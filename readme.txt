@@ -4,7 +4,10 @@ OOutSize
 OOutSize shows what is using the space on a drive or folder. A folder tree
 with size bars sits next to a treemap you can drill into.
 
+OOutSize is open source so you can audit the safety before use.
 It is one PowerShell file. There is nothing to install.
+
+https://github.com/zinkwazi/ooutsize
 
 How to run it
 -------------
