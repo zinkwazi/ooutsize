@@ -2,7 +2,8 @@ OOutSize
 ========
 
 OOutSize shows what is using the space on a drive or folder. A folder tree
-with size bars sits next to a treemap you can drill into.
+with size bars sits next to a treemap you can drill into. You can delete
+straight from it, with a confirm box every time.
 
 OOutSize is open source so you can audit the safety before use.
 It is one PowerShell file. There is nothing to install.
@@ -63,6 +64,8 @@ Top row of tiles
 - free: free space on the volume. The tile is green, yellow under 20 percent
   or red under 10 percent
 
+Under the path it says how long the scan took and on how many threads.
+
 Left side, the tree
 
 - Folders and files, biggest first
@@ -88,11 +91,60 @@ Mouse and keys
 - Double click a block in the map to zoom in
 - Backspace or the Up button goes back out
 - Hover over a block for its name, size and date
-- Right click for Open in Explorer, Copy path and Copy listing
+- Right click for Open in Explorer, Copy path, Copy listing, Scan again,
+  Move to Recycle Bin and Delete permanently
+- Del moves the selected row to the Recycle Bin. Shift+Del deletes it
+  permanently. Both ask first
 - Click a file type under the map to keep its colour and fade out the rest.
   Click it again to switch back
 - F5 scans again
 - Esc stops a scan and shows what it has so far
+
+
+Deleting
+--------
+
+Right click a file or folder and pick Move to Recycle Bin or Delete
+permanently. Nothing happens until you answer Yes in the box that follows.
+The box shows the full path and the size from the scan. No is the default
+button.
+
+- The delete is handed to Windows itself, the same code Explorer uses. Its
+  usual windows may appear: progress, a file in use, a request for admin
+  rights
+- Afterwards the tree, the map and the tiles update. No full rescan needed
+- Recycle Bin: the space is not freed until the bin is emptied. On a whole
+  drive scan you will see the item turn up under $Recycle.Bin
+- Network drives have no Recycle Bin. Windows asks before it deletes for
+  good instead
+- If only part of a folder could be deleted, OOutSize scans that folder
+  again and shows what is left
+
+What OOutSize will not delete
+
+- Anything striped, see System files below
+- These whole folders on the Windows drive: Users, ProgramData,
+  ProgramData\Microsoft, Program Files and Program Files (x86). Things
+  inside them can be deleted
+- The folder the scan started in
+- A "smaller files" row, which is many files rolled into one
+- Anything with a path over 259 characters or with something that deep
+  inside it
+- Anything with a name ending in a dot or a space
+
+The Windows delete function cannot be trusted with those last two.
+
+What gets a sterner question first
+
+- Anything inside Program Files, ProgramData\Microsoft,
+  ProgramData\Package Cache or $Recycle.Bin
+- Windows upgrade leftovers such as Windows.old
+- A user profile folder
+
+Scan again on the right click menu rescans one folder and leaves the rest
+of the tree alone. Use it after cleaning something up outside OOutSize.
+
+Start OOutSize with -ReadOnly to take the delete options away.
 
 
 System files
@@ -101,17 +153,22 @@ System files
 Some of the biggest things on a Windows drive must not be deleted by hand.
 Hover over one and OOutSize says why and what to do instead.
 
-Striped, because they belong to Windows
+Striped, because they belong to Windows. Delete is switched off for these
 
 - Windows, including WinSxS, Installer and SoftwareDistribution
 - pagefile.sys, swapfile.sys and hiberfil.sys
 - System Volume Information, Recovery, Boot and EFI
 
-Not striped, but the same warning shows when you hover
+Inside Windows these are not striped, because they only hold temporary
+files, logs and crash dumps: Temp, Logs, Minidump, LiveKernelReports and
+MEMORY.DMP.
+
+Not striped, but a warning shows when you hover or delete
 
 - Program Files and Program Files (x86)
 - ProgramData\Microsoft and ProgramData\Package Cache
 - $Recycle.Bin
+- Windows.old, $Windows.~BT and $Windows.~WS
 
 This is a fixed list matched by path. It is a guide, not a guarantee.
 Something with no warning is not automatically safe to delete.
@@ -130,13 +187,30 @@ What the sizes mean
   into a single "smaller files" row. Nothing is left out of the totals
 
 
+Speed
+-----
+
+OOutSize walks the folders on several threads at once. The first scan
+after a restart is the slowest one, because Windows has to read the folder
+information from the disk. A second scan of the same drive is much quicker.
+
+Tools such as TreeSize and WizTree can be faster on a local NTFS drive
+because they read the Master File Table straight off the disk instead of
+walking the folders. OOutSize does not do that. It asks Windows for folder
+listings the normal way, which also works on network shares and other
+file systems.
+
+
 Is it safe to run
 -----------------
 
-- It only lists folders: names, sizes and dates
-- It never opens, changes or deletes a file. There is no delete button
-- It writes nothing to the drive it scans. The only thing written is a
-  small temporary file in your TEMP folder while Windows compiles the tool
+- Scanning only lists folders: names, sizes and dates. It never opens or
+  changes a file
+- Nothing is deleted unless you choose one of the two delete options and
+  then answer Yes. -ReadOnly removes those options
+- Apart from a delete you ask for, it writes nothing to the drive it scans.
+  The only other thing written is a small temporary file in your TEMP
+  folder while Windows compiles the tool
 - Security software may log PowerShell starting csc.exe at launch. That is
   the compile step and it is expected
 
@@ -147,18 +221,32 @@ Options
 -Path <drive or folder>
     What to scan, for example C:\ or D:\Shares or \\server\share
 
+-ReadOnly
+    Leave out the delete options, for a window that can only look
+
 -BackupPrivilege
     From an admin window, lets the scan list folders that even
     administrators are normally locked out of, such as System Volume
     Information and other people's profiles. Off unless you ask for it
 
+-Threads <number>
+    How many threads list folders at once. The default is twice the number
+    of processors, at least 4 and at most 32. Use a low number such as 2
+    to go easy on a busy file server
+
 -MaxFilesPerFolder <number>
     How many files in one folder get a row of their own. Default 5000.
     0 means no limit
 
-Example
+-ClassicScan
+    List folders the way the first version did. It is slower. Try it if
+    the totals look wrong on an unusual file system or network share
+
+Examples
 
     powershell -ExecutionPolicy Bypass -File C:\Temp\OOutSize.ps1 -Path D:\Shares -BackupPrivilege
+
+    powershell -ExecutionPolicy Bypass -File C:\Temp\OOutSize.ps1 -Path \\server\share -ReadOnly
 
 Full help
 
@@ -175,14 +263,27 @@ If something goes wrong
     AppLocker or WDAC is restricting PowerShell on this computer and the
     tool cannot start there
 
+"A different version of OOutSize is already loaded"
+    That PowerShell window ran an older copy earlier. Open a new
+    PowerShell window and run it again
+
 Red compiler errors when it starts
     Copy the text of the first error and send it to whoever gave you
     this file
 
 The scan is slow
     A large drive with millions of files can take several minutes. The
-    progress screen shows what it has found so far. Esc stops it early
+    first scan after a restart is the slowest. The progress screen shows
+    what it has found so far. Esc stops it early
 
 The numbers look too small
     Check for the yellow strip. Without admin rights, folders the account
     cannot read are missing from the totals
+
+There is no delete on the right click menu
+    Either it was started with -ReadOnly or it is an older copy of the
+    file. The current one shows the thread count next to the scan time
+
+A delete did nothing
+    Windows refused it, usually because the file is in use or the account
+    is not allowed. The status line at the bottom says what happened

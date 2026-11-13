@@ -7,8 +7,12 @@
     Runs on what ships with Windows: Windows PowerShell and the .NET Framework. Nothing to install.
     The window is written in C# further down this file and Add-Type compiles it when the script starts.
 
-    It only lists folders (names, sizes, dates). It never opens, changes or deletes a file and it
+    Scanning only lists folders (names, sizes, dates). It never opens or changes a file and it
     writes nothing to the disk it scans.
+
+    Nothing is deleted unless you pick Move to Recycle Bin or Delete permanently from the right
+    click menu and then answer Yes. Windows system files cannot be deleted from here at all.
+    Start it with -ReadOnly to take the delete options away.
 
     It runs without admin rights, but then any folder the account cannot read is left out of the
     totals. A yellow strip across the window and a console warning say so when that is the case.
@@ -24,7 +28,8 @@
     Mouse and keys:
       - Click a folder in the tree to show it in the map. Arrow keys work in the tree.
       - Double click a block in the map to zoom in. Backspace or the Up button goes back out.
-      - Right click anything for Open in Explorer, Copy path and Copy listing.
+      - Right click anything for Open in Explorer, Copy path, Copy listing, Scan again,
+        Move to Recycle Bin and Delete permanently. Del and Shift+Del do the last two from the tree.
       - Click a file type under the map to keep its colour and fade out the rest.
       - Striped blocks belong to Windows. Hover over one to see why it should not be deleted by hand.
       - A date in an orange tag means nothing in that folder has changed for over a year.
@@ -43,11 +48,25 @@
     How many files in one folder get a row of their own, biggest first. The rest of that folder
     shows as a single "smaller files" row. 0 means no limit. Default 5000.
 
+.PARAMETER Threads
+    How many threads list folders at the same time. 0, the default, picks twice the number of
+    processors, at least 4 and at most 32. Use a low number such as 2 to go easy on a busy file server.
+
+.PARAMETER ClassicScan
+    List folders the way the first version did. It is slower. Try it if the totals look wrong on
+    an unusual file system or network share.
+
+.PARAMETER ReadOnly
+    Leave out the delete options, for a window that can only look.
+
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\OOutSize.ps1 C:\
 
 .EXAMPLE
     .\OOutSize.ps1 -Path D:\Shares -BackupPrivilege
+
+.EXAMPLE
+    .\OOutSize.ps1 -Path \\server\share -Threads 4 -ReadOnly
 #>
 [CmdletBinding()]
 param(
@@ -57,7 +76,14 @@ param(
     [switch]$BackupPrivilege,
 
     [ValidateRange(0, 1000000)]
-    [int]$MaxFilesPerFolder = 5000
+    [int]$MaxFilesPerFolder = 5000,
+
+    [ValidateRange(0, 64)]
+    [int]$Threads = 0,
+
+    [switch]$ClassicScan,
+
+    [switch]$ReadOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -80,6 +106,9 @@ if ($PSVersionTable.PSEdition -eq 'Core') {
     $handOff = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, '-MaxFilesPerFolder', $MaxFilesPerFolder)
     if ($Path) { $handOff += @('-Path', $Path) }
     if ($BackupPrivilege) { $handOff += '-BackupPrivilege' }
+    if ($Threads) { $handOff += @('-Threads', $Threads) }
+    if ($ClassicScan) { $handOff += '-ClassicScan' }
+    if ($ReadOnly) { $handOff += '-ReadOnly' }
     & $winPs @handOff
     return
 }
@@ -186,6 +215,34 @@ namespace OOutSize
             if (a.Size != b.Size) return a.Size > b.Size ? -1 : 1;
             return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
         }
+
+        // a folder is the sum of its rows. sorts them big first while it is there
+        public static void AddUp(Node d, Comparison<Node> order)
+        {
+            if (d.Kids == null) d.Kids = None;
+            Node[] kids = d.Kids;
+            long size = 0, newest = 0, files = 0, dirs = 0;
+            for (int k = 0; k < kids.Length; k++)
+            {
+                Node c = kids[k];
+                size += c.Size;
+                files += c.Files;
+                if (c.Kind == Node.KDir) dirs += 1 + c.Dirs;
+                if (c.Stamp > newest) newest = c.Stamp;
+            }
+            d.Size = size;
+            d.Stamp = newest;
+            d.Files = files > int.MaxValue ? int.MaxValue : (int)files;
+            d.Dirs = dirs > int.MaxValue ? int.MaxValue : (int)dirs;
+            if (kids.Length > 1) Array.Sort<Node>(kids, order);
+        }
+
+        // after a row is taken out or swapped, redo that folder and every folder above it
+        public static void Recount(Node from)
+        {
+            Comparison<Node> order = new Comparison<Node>(BigFirst);
+            for (Node d = from; d != null; d = d.Parent) AddUp(d, order);
+        }
     }
 
     // the stuff on a windows volume that looks like a juicy thing to delete and is not. matched on the path
@@ -205,16 +262,18 @@ namespace OOutSize
             "Recycle Bin storage. Empty the Recycle Bin instead of deleting in here.",
             "Boot and recovery files. Do not delete.",
             "Windows paging file. Do not delete. Its size is set under System Properties, Advanced, Performance, Virtual memory.",
-            "Hibernation file. Do not delete. Turning hibernation off with powercfg /h off removes it."
+            "Hibernation file. Do not delete. Turning hibernation off with powercfg /h off removes it.",
+            "Left over from a Windows upgrade. Remove it with Disk Cleanup, Clean up system files, rather than by hand."
         };
 
         static readonly Dictionary<string, byte> rules = Build();
 
-        // windows itself, the page and hibernation files, shadow copies and boot files get striped.
-        // program files, programdata and the recycle bin keep the warning but look like everything else
+        // windows itself, the page and hibernation files, shadow copies and boot files get striped, and delete
+        // refuses them. program files, programdata, the recycle bin and upgrade leftovers keep the warning but
+        // look like everything e;se and can be deleted after a sterner question
         public static bool Striped(byte id)
         {
-            return id != 0 && id != 5 && id != 6 && id != 7 && id != 9;
+            return id != 0 && id != 5 && id != 6 && id != 7 && id != 9 && id != 13;
         }
 
         static Dictionary<string, byte> Build()
@@ -224,6 +283,15 @@ namespace OOutSize
             r["Windows\\WinSxS"] = 2;
             r["Windows\\Installer"] = 3;
             r["Windows\\SoftwareDistribution"] = 4;
+            // temp files, logs and crash dumps. inside windows but fair game, so they drop out of the rule above them
+            r["Windows\\Temp"] = 0;
+            r["Windows\\Logs"] = 0;
+            r["Windows\\Minidump"] = 0;
+            r["Windows\\LiveKernelReports"] = 0;
+            r["Windows\\MEMORY.DMP"] = 0;
+            r["Windows.old"] = 13;
+            r["$Windows.~BT"] = 13;
+            r["$Windows.~WS"] = 13;
             r["Program Files"] = 5;
             r["Program Files (x86)"] = 5;
             r["ProgramData\\Microsoft"] = 6;
@@ -268,6 +336,46 @@ namespace OOutSize
         {
             byte hit;
             return rules.TryGetValue(parentBelow.Length == 0 ? name : parentBelow + "\\" + name, out hit) ? hit : inherited;
+        }
+
+        // the windows drive without the slash, C: on nearly every box. empty off windows
+        static readonly string Home = HomeDrive();
+
+        static string HomeDrive()
+        {
+            try { return (Path.GetPathRoot(Environment.SystemDirectory) ?? "").TrimEnd('\\', '/'); }
+            catch { return ""; }
+        }
+
+        static string OnHome(string path)
+        {
+            if (Home.Length == 0 || path.Length <= Home.Length + 1) return null;
+            if (!path.StartsWith(Home, StringComparison.OrdinalIgnoreCase) || path[Home.Length] != '\\') return null;
+            return path.Substring(Home.Length + 1);
+        }
+
+        // folders on the windows drive that are never deleted whole, though things inside them can be.
+        // these only matter to delete, they do not mark anything in the map
+        public static string Keep(string path)
+        {
+            string rel = OnHome(path);
+            if (rel == null) return "";
+            if (string.Equals(rel, "Users", StringComparison.OrdinalIgnoreCase)) return "Every user profile on this computer lives in this folder.";
+            if (string.Equals(rel, "ProgramData", StringComparison.OrdinalIgnoreCase)) return "Windows and most installed programs keep their settings and data in this folder.";
+            if (string.Equals(rel, "ProgramData\\Microsoft", StringComparison.OrdinalIgnoreCase)) return "Windows keeps its own application data in this folder.";
+            if (string.Equals(rel, "Program Files", StringComparison.OrdinalIgnoreCase) || string.Equals(rel, "Program Files (x86)", StringComparison.OrdinalIgnoreCase))
+                return "Every installed program lives in this folder. Remove programs one at a time with Apps and Features.";
+            return "";
+        }
+
+        // allowed, but worth a line in the confirm box
+        public static string Care(string path)
+        {
+            string rel = OnHome(path);
+            if (rel == null) return "";
+            if (rel.StartsWith("Users\\", StringComparison.OrdinalIgnoreCase) && rel.IndexOf('\\', 6) < 0)
+                return "This is a user profile. Windows keeps its own record of each profile, so the clean way to remove one is System Properties, Advanced, User Profiles.";
+            return "";
         }
 
         // for the folder a scan starts in, which may already be inside a guarded place
@@ -335,14 +443,17 @@ namespace OOutSize
         }
     }
 
-    // straight win32 - findfirstfile hands back name, size and attributes in one go and
-    // does not care about the 260 char path limit when the path wears the \\?\ prefix
+    // straight win32 and one ntdll call. none of it cares about the 260 char path limit
+    // as long as the path wears the \\?\ prefix
     internal static class Native
     {
         public const uint DIRECTORY = 0x10, SPARSE = 0x200, REPARSE = 0x400, COMPRESSED = 0x800,
             OFFLINE = 0x1000, RECALL_OPEN = 0x40000, RECALL_DATA = 0x400000;
         public const uint THIN = SPARSE | COMPRESSED | OFFLINE | RECALL_OPEN | RECALL_DATA;
-        public const uint TAG_MOUNT = 0xA0000003, TAG_SYMLINK = 0xA000000C;
+        // set in the reparse tag of anything that stands in for some other place - junctions, mounted volumes,
+        // symlinks. a tag without it, like the ones onedrive and dedup put on folders, is sti;l a real folder
+        public const uint SURROGATE = 0x20000000;
+        public const int NO_MORE_FILES = unchecked((int)0x80000006), NO_SUCH_FILE = unchecked((int)0xC000000F);
         public static readonly IntPtr Bad = new IntPtr(-1);
         public static readonly bool IsWindows = Environment.OSVersion.Platform == PlatformID.Win32NT;
 
@@ -358,6 +469,10 @@ namespace OOutSize
             [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string Name;
             [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 14)] public string ShortName;
         }
+
+        // IO_STATUS_BLOCK - Information is how many bytes of the buffer got filled
+        [StructLayout(LayoutKind.Sequential)]
+        public struct IoStatus { public IntPtr Status; public IntPtr Information; }
 
         [StructLayout(LayoutKind.Sequential)]
         public struct Luid { public uint Low; public int High; }
@@ -379,6 +494,21 @@ namespace OOutSize
         [DllImport("kernel32.dll", EntryPoint = "GetCompressedFileSizeW", CharSet = CharSet.Unicode, SetLastError = true)]
         public static extern uint CompressedSize(string path, out uint high);
 
+        [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern IntPtr CreateFile(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+
+        // class 2 is FILE_FULL_DIR_INFORMATION, the same rows findfirstfile reads when asked for the basic info level
+        [DllImport("ntdll.dll")]
+        public static extern int NtQueryDirectoryFile(IntPtr handle, IntPtr signal, IntPtr apcRoutine, IntPtr apcContext,
+            out IoStatus io, [Out] byte[] buffer, int length, int infoClass,
+            [MarshalAs(UnmanagedType.U1)] bool single, IntPtr mask, [MarshalAs(UnmanagedType.U1)] bool restart);
+
+        // list access only, shared with everyone, and backup semantics because that is how a folder gets opened at all
+        public static IntPtr OpenDir(string longPath)
+        {
+            return CreateFile(longPath, 0x00100001, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
+        }
+
         [DllImport("kernel32.dll", EntryPoint = "GetDiskFreeSpaceExW", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool DiskFree(string dir, out ulong freeToCaller, out ulong total, out ulong free);
@@ -388,7 +518,7 @@ namespace OOutSize
 
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        static extern bool CloseHandle(IntPtr handle);
+        public static extern bool CloseHandle(IntPtr handle);
 
         [DllImport("advapi32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -402,6 +532,102 @@ namespace OOutSize
         [return: MarshalAs(UnmanagedType.Bool)]
         static extern bool AdjustTokenPrivileges(IntPtr token, [MarshalAs(UnmanagedType.Bool)] bool disableAll,
             ref TokenPrivileges state, int length, IntPtr previous, IntPtr returned);
+
+        [DllImport("kernel32.dll", EntryPoint = "GetFileAttributesW", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern uint Attributes(string path);
+
+        // SHFILEOPSTRUCTW. the 32 bit headers pack it to one byte and the 64 bit ones do not, so there are two
+        [StructLayout(LayoutKind.Sequential)]
+        struct FileOp64
+        {
+            public IntPtr Owner;
+            public uint Func;
+            public IntPtr From;
+            public IntPtr To;
+            public ushort Flags;
+            public int Aborted;
+            public IntPtr Mappings;
+            public IntPtr Title;
+        }
+
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct FileOp32
+        {
+            public IntPtr Owner;
+            public uint Func;
+            public IntPtr From;
+            public IntPtr To;
+            public ushort Flags;
+            public int Aborted;
+            public IntPtr Mappings;
+            public IntPtr Title;
+        }
+
+        [DllImport("shell32.dll", EntryPoint = "SHFileOperationW")]
+        static extern int FileOperation64(ref FileOp64 op);
+
+        [DllImport("shell32.dll", EntryPoint = "SHFileOperationW")]
+        static extern int FileOperation32(ref FileOp32 op);
+
+        static readonly char[] Wild = { '*', '?', '"', '<', '>', '|' };
+
+        // missing means windows said not found. anything else, access denied included, counts as sti;l there
+        public static bool Exists(string path)
+        {
+            if (!IsWindows) return File.Exists(path) || Directory.Exists(path);
+            if (Attributes(Long(path)) != 0xFFFFFFFF) return true;
+            int err = Marshal.GetLastWin32Error();
+            return err != 2 && err != 3;
+        }
+
+        // the shell tidies a path before it acts on it. one that would change under that tidy up - a name ending in a dot
+        // or a space, a device name, wildcards, over 259 characters - could land on a different item, so those are refused
+        public static bool Plain(string path)
+        {
+            if (path.Length > 259 || path.IndexOfAny(Wild) >= 0) return false;
+            try { return string.Equals(Path.GetFullPath(path), path, StringComparison.Ordinal); }
+            catch { return false; }
+        }
+
+        // hands the delete to the windows shell, the code explorer itself runs. it knows about the recycle bin, junctions,
+        // files in use and when to ask for elevation, and it puts up its own progress and error windows. 0 means it ran
+        public static int ShellDelete(IntPtr owner, string path, bool recycle, out bool aborted)
+        {
+            aborted = false;
+            if (!IsWindows) return 50;
+            // the shell wants a list that ends in two nulls. one goes on here and the marshaller adds the other
+            IntPtr from = Marshal.StringToHGlobalUni(path + "\0");
+            try
+            {
+                // 0x10 skip the shell's own are you sure, ours came first. 0x2000 only what was named, so a web page does
+                // not take its _files folder along. 0x8000 a link is a thing to remove, never a door to walk through.
+                // recycle adds 0x40 allow undo, and 0x4000 so it sti;l asks when an item cannot go to the bin
+                ushort flags = (ushort)(recycle ? 0x10 | 0x2000 | 0x8000 | 0x40 | 0x4000 : 0x10 | 0x2000 | 0x8000);
+                int code;
+                if (IntPtr.Size == 8)
+                {
+                    FileOp64 op = new FileOp64();
+                    op.Owner = owner;
+                    op.Func = 3;        // FO_DELETE
+                    op.From = from;
+                    op.Flags = flags;
+                    code = FileOperation64(ref op);
+                    aborted = op.Aborted != 0;
+                }
+                else
+                {
+                    FileOp32 op = new FileOp32();
+                    op.Owner = owner;
+                    op.Func = 3;
+                    op.From = from;
+                    op.Flags = flags;
+                    code = FileOperation32(ref op);
+                    aborted = op.Aborted != 0;
+                }
+                return code;
+            }
+            finally { Marshal.FreeHGlobal(from); }
+        }
 
         public static string Long(string path)
         {
@@ -454,12 +680,48 @@ namespace OOutSize
         public byte Guard;
     }
 
-    // walks the tree on a few threads. the ui only reads the counters til Done flips
+    // file extensions seen so far. one table per scan, shared by its workers and by any later rescan of one folder
+    internal sealed class TypeTable
+    {
+        readonly Dictionary<string, int> ids = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        readonly List<string> list = new List<string>();
+
+        public TypeTable()
+        {
+            list.Add("");
+            ids[""] = 0;
+        }
+
+        public int Id(string ext)
+        {
+            lock (ids)
+            {
+                int id;
+                if (ids.TryGetValue(ext, out id)) return id;
+                if (list.Count >= 30000) return 0;     // someone is using random extensions, stop counting them
+                id = list.Count;
+                list.Add(ext.ToLowerInvariant());
+                ids[ext] = id;
+                return id;
+            }
+        }
+
+        public string[] Names()
+        {
+            lock (ids) return list.ToArray();
+        }
+    }
+
+    // walks the tree on a crew of threads. the ui only reads the counters til Done flips
     internal sealed class Scanner
     {
         public string RootPath;
+        public string GuardRoot;            // where the first scan started, when this one only redoes a folder inside it
+        public TypeTable Types;
         public int PerFolder = 5000;        // files that get their own row per folder, the rest become a pile
         public int SoftCap = 2500000;       // past this many file rows we get stingy so ram does not go rubar
+        public int Threads;                 // 0 means pick from the cpu count
+        public bool Classic;                // list folders the findfirstfile way like the first version did
 
         public long FilesSeen, DirsSeen, BytesSeen;
         public volatile string Where = "";
@@ -472,21 +734,14 @@ namespace OOutSize
         public bool Capped;
         public int Links;
         public int UnreadableCount;
-        public long GuardedBytes;
+        public int Crew;
         public double Seconds;
         public readonly List<string> Unreadable = new List<string>();
-        public string[] TypeNames = new string[0];
-        public long[] TypeBytes = new long[0];
-        public int[] TypeCount = new int[0];
 
         readonly object gate = new object();
         readonly Stack<Node> todo = new Stack<Node>();
-        readonly List<Node> allDirs = new List<Node>();
-        int busy;
+        int busy, idle;
         long kept;
-        readonly object typeGate = new object();
-        readonly Dictionary<string, int> typeIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        readonly List<string> typeList = new List<string>();
 
         static readonly Comparison<FileRec> BigFirst = delegate(FileRec a, FileRec b) { return b.Size.CompareTo(a.Size); };
 
@@ -501,26 +756,24 @@ namespace OOutSize
         void Run()
         {
             Stopwatch sw = Stopwatch.StartNew();
-            Worker[] crew = new Worker[0];
             try
             {
-                typeList.Add("");
-                typeIds[""] = 0;
+                if (Types == null) Types = new TypeTable();
                 Root = new Node();
                 Root.Name = RootPath;
                 Root.Kind = Node.KDir;
                 Root.Type = -1;
-                Root.Guard = Guard.Whole(Guard.Below(RootPath, RootPath));
-                allDirs.Add(Root);
+                Root.Guard = Guard.Whole(Guard.Below(RootPath, GuardRoot ?? RootPath));
                 todo.Push(Root);
 
-                int n = Math.Max(1, Math.Min(4, Environment.ProcessorCount));
-                crew = new Worker[n];
+                // most of the wait is the disk and the filter drivers sat on top of it, not this code,
+                // so going wider than the core count sti;l buys time
+                int n = Threads > 0 ? Threads : Math.Max(4, Math.Min(32, Environment.ProcessorCount * 2));
+                Crew = n;
                 Thread[] threads = new Thread[n];
                 for (int i = 0; i < n; i++)
                 {
-                    crew[i] = new Worker(this);
-                    threads[i] = new Thread(crew[i].Loop);
+                    threads[i] = new Thread(new Worker(this).Loop);
                     threads[i].IsBackground = true;
                     threads[i].Name = "ooutsize walk " + i;
                     threads[i].Start();
@@ -528,7 +781,6 @@ namespace OOutSize
                 for (int i = 0; i < n; i++) threads[i].Join();
                 Stopped = Cancel;
                 Where = "adding it all up";
-                MergeTypes(crew);
                 RollUp();
             }
             catch (Exception ex) { Error = ex.Message; }
@@ -536,60 +788,41 @@ namespace OOutSize
             Done = true;
         }
 
-        void MergeTypes(Worker[] crew)
-        {
-            int n = typeList.Count;
-            TypeNames = typeList.ToArray();
-            TypeBytes = new long[n];
-            TypeCount = new int[n];
-            for (int w = 0; w < crew.Length; w++)
-            {
-                if (crew[w] == null) continue;
-                int m = Math.Min(n, crew[w].Bytes.Length);
-                for (int i = 0; i < m; i++) { TypeBytes[i] += crew[w].Bytes[i]; TypeCount[i] += crew[w].Count[i]; }
-                GuardedBytes += crew[w].Guarded;
-            }
-        }
-
-        // kids always land in allDirs after their parent so walking it backwards is bottom up - no recursion needed
+        // list every folder with parents ahead of their kids, then add up walking that list backwards
+        // so a folder is always done after everything inside it - no recursion needed
         void RollUp()
         {
             Comparison<Node> order = new Comparison<Node>(Tree.BigFirst);
-            for (int i = allDirs.Count - 1; i >= 0; i--)
+            List<Node> all = new List<Node>();
+            all.Add(Root);
+            for (int i = 0; i < all.Count; i++)
             {
-                Node d = allDirs[i];
-                if (d.Kids == null) d.Kids = Tree.None;
-                Node[] kids = d.Kids;
-                long size = 0, newest = 0, files = 0, dirs = 0;
-                for (int k = 0; k < kids.Length; k++)
-                {
-                    Node c = kids[k];
-                    size += c.Size;
-                    files += c.Files;
-                    if (c.Kind == Node.KDir) dirs += 1 + c.Dirs;
-                    if (c.Stamp > newest) newest = c.Stamp;
-                }
-                d.Size = size;
-                d.Stamp = newest;
-                d.Files = files > int.MaxValue ? int.MaxValue : (int)files;
-                d.Dirs = dirs > int.MaxValue ? int.MaxValue : (int)dirs;
-                if (kids.Length > 1) Array.Sort<Node>(kids, order);
+                Node[] kids = all[i].Kids;
+                if (kids == null) continue;
+                for (int k = 0; k < kids.Length; k++) if (kids[k].Kind == Node.KDir) all.Add(kids[k]);
             }
-            allDirs.Clear();
-            allDirs.TrimExcess();
+            for (int i = all.Count - 1; i >= 0; i--) Tree.AddUp(all[i], order);
         }
 
-        int TypeId(string ext)
+        // what each file type adds up to, read off the finished tree so it still holds after rows get
+        // removed or a folder is scanned again. a pile only counts when everything in it is one type
+        public static void Tally(Node top, long[] bytes, out long guarded)
         {
-            lock (typeGate)
+            guarded = 0;
+            List<Node> stack = new List<Node>();
+            stack.Add(top);
+            while (stack.Count > 0)
             {
-                int id;
-                if (typeIds.TryGetValue(ext, out id)) return id;
-                if (typeList.Count >= 30000) return 0;     // someone is using random extensions, stop counting them
-                id = typeList.Count;
-                typeList.Add(ext.ToLowerInvariant());
-                typeIds[ext] = id;
-                return id;
+                Node n = stack[stack.Count - 1];
+                stack.RemoveAt(stack.Count - 1);
+                if (n.Kind == Node.KDir)
+                {
+                    Node[] kids = n.Kids;
+                    if (kids != null) for (int i = 0; i < kids.Length; i++) stack.Add(kids[i]);
+                    continue;
+                }
+                if (n.Type >= 0 && n.Type < bytes.Length) bytes[n.Type] += n.Size;
+                if (Guard.Striped(n.Guard)) guarded += n.Size;
             }
         }
 
@@ -608,14 +841,19 @@ namespace OOutSize
             readonly List<FileRec> files = new List<FileRec>();
             readonly List<Node> dirs = new List<Node>();
             readonly Dictionary<string, int> seen = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            public long[] Bytes = new long[64];
-            public int[] Count = new int[64];
-            public long Guarded;
+            readonly byte[] slab;
+            readonly string guardRoot;
+            char[] letters = new char[512];
             string below = "";
             bool shallow;
             byte inherited;
 
-            public Worker(Scanner owner) { s = owner; }
+            public Worker(Scanner owner)
+            {
+                s = owner;
+                guardRoot = owner.GuardRoot ?? owner.RootPath;
+                slab = Native.IsWindows && !owner.Classic ? new byte[65536] : null;
+            }
 
             public void Loop()
             {
@@ -629,7 +867,9 @@ namespace OOutSize
                             while (s.todo.Count == 0)
                             {
                                 if (s.busy == 0 || s.Cancel) { Monitor.PulseAll(s.gate); return; }
+                                s.idle++;
                                 Monitor.Wait(s.gate, 200);
+                                s.idle--;
                             }
                             if (s.Cancel) { Monitor.PulseAll(s.gate); return; }
                             dir = s.todo.Pop();
@@ -650,7 +890,8 @@ namespace OOutSize
                         }
                         finally
                         {
-                            lock (s.gate) { s.busy--; Monitor.PulseAll(s.gate); }
+                            // only the last one out with nothing left to do needs to wake the others, so they can go home
+                            lock (s.gate) { s.busy--; if (s.busy == 0 && s.todo.Count == 0) Monitor.PulseAll(s.gate); }
                         }
                     }
                 }
@@ -663,10 +904,18 @@ namespace OOutSize
                 s.Where = path;
                 files.Clear();
                 dirs.Clear();
-                below = Guard.Below(path, s.RootPath);
+                below = Guard.Below(path, guardRoot);
                 shallow = Guard.Shallow(below);
                 inherited = dir.Guard;
-                bool ok = Native.IsWindows ? ListNative(dir, path) : ListManaged(dir, path);
+                bool ok;
+                if (!Native.IsWindows) ok = ListManaged(dir, path);
+                else if (slab != null && ListFast(dir, path)) ok = true;
+                else
+                {
+                    files.Clear();
+                    dirs.Clear();
+                    ok = ListNative(dir, path);
+                }
                 for (int i = 0; i < dirs.Count; i++)
                     dirs[i].Guard = shallow ? Guard.Child(below, dirs[i].Name, inherited) : inherited;
                 Interlocked.Increment(ref s.DirsSeen);
@@ -710,14 +959,17 @@ namespace OOutSize
                     Node pile = new Node();
                     pile.Parent = dir;
                     pile.Kind = Node.KPile;
-                    pile.Type = -1;
                     pile.Files = rest;
                     pile.Guard = inherited;
+                    // a pile that is all one type keeps that type, so it gets the colour and counts in the key
+                    short same = files[keep].Type;
                     for (int i = keep; i < files.Count; i++)
                     {
                         pile.Size += files[i].Size;
                         if (files[i].Stamp > pile.Stamp) pile.Stamp = files[i].Stamp;
+                        if (files[i].Type != same) same = -1;
                     }
+                    pile.Type = same;
                     pile.Name = Fmt.Count(rest) + " smaller files";
                     kids[k++] = pile;
                 }
@@ -728,10 +980,98 @@ namespace OOutSize
                 {
                     lock (s.gate)
                     {
-                        for (int i = 0; i < dirs.Count; i++) { s.allDirs.Add(dirs[i]); s.todo.Push(dirs[i]); }
-                        Monitor.PulseAll(s.gate);
+                        for (int i = 0; i < dirs.Count; i++) s.todo.Push(dirs[i]);
+                        // this thread takes one of them itself. wake a sleeper for each of the rest and no more -
+                        // waking the whole crew on every push was a stampede that got worse with each thread added
+                        int wake = Math.Min(dirs.Count - 1, s.idle);
+                        for (int i = 0; i < wake; i++) Monitor.Pulse(s.gate);
                     }
                 }
+            }
+
+            // one open, then the whole listing comes back in 64k slabs with the size on disk already in each row,
+            // so no file has to be opened to ask what it really takes up. findfirstfile and newer .net sit on this
+            // same call. false means nothing was listed here and the old lister should have a go
+            bool ListFast(Node dir, string path)
+            {
+                IntPtr h = Native.OpenDir(Native.Long(path));
+                if (h == Native.Bad)
+                {
+                    int err = Marshal.GetLastWin32Error();
+                    return err == 2 || err == 3;        // gone since we saw it, same as empty
+                }
+                try
+                {
+                    bool first = true;
+                    while (true)
+                    {
+                        Native.IoStatus io;
+                        int status = Native.NtQueryDirectoryFile(h, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, out io,
+                            slab, slab.Length, 2, false, IntPtr.Zero, first);
+                        if (status != 0)
+                        {
+                            // no more files is the normal way out. an empty volume root says no such file instead
+                            if (status == Native.NO_MORE_FILES || status == Native.NO_SUCH_FILE) return true;
+                            return !first;
+                        }
+                        first = false;
+                        long got = io.Information.ToInt64();
+                        if (got <= 0) return true;
+                        // FILE_FULL_DIR_INFORMATION rows chained by the offset in their first four bytes
+                        int off = 0;
+                        while (off + 68 <= got)
+                        {
+                            int next = BitConverter.ToInt32(slab, off);
+                            int nameBytes = BitConverter.ToInt32(slab, off + 60);
+                            if (nameBytes < 0 || off + 68 + nameBytes > got) break;
+                            Row(dir, off, nameBytes >> 1);
+                            if (next <= 0) break;
+                            off += next;
+                        }
+                        if (s.Cancel) return true;
+                    }
+                }
+                finally { Native.CloseHandle(h); }
+            }
+
+            // row layout: write time at 24, size at 40, size on disk at 48, attributes at 56, reparse tag at 64, name at 68
+            void Row(Node dir, int off, int chars)
+            {
+                uint attr = BitConverter.ToUInt32(slab, off + 56);
+                if ((attr & Native.DIRECTORY) != 0)
+                {
+                    if (chars == 1 && slab[off + 68] == 46 && slab[off + 69] == 0) return;
+                    if (chars == 2 && slab[off + 68] == 46 && slab[off + 69] == 0 && slab[off + 70] == 46 && slab[off + 71] == 0) return;
+                    // junctions and symlinks point somewhere e;se, following them double counts or loops
+                    if ((attr & Native.REPARSE) != 0 && (BitConverter.ToUInt32(slab, off + 64) & Native.SURROGATE) != 0)
+                    {
+                        Interlocked.Increment(ref s.Links);
+                        return;
+                    }
+                    Node c = new Node();
+                    c.Name = NameAt(off + 68, chars);
+                    c.Parent = dir;
+                    c.Kind = Node.KDir;
+                    c.Type = -1;
+                    dirs.Add(c);
+                    return;
+                }
+                long size = BitConverter.ToInt64(slab, off + 40);
+                // sparse, compressed and cloud placeholder files lie about their size, so they count as what is on disk
+                if ((attr & Native.THIN) != 0)
+                {
+                    long onDisk = BitConverter.ToInt64(slab, off + 48);
+                    if (onDisk >= 0 && onDisk < size) size = onDisk;
+                }
+                Take(NameAt(off + 68, chars), size, BitConverter.ToInt64(slab, off + 24));
+            }
+
+            // straight copy of the utf-16 so a name with a broken surrogate in it comes through untouched
+            string NameAt(int at, int chars)
+            {
+                if (chars > letters.Length) letters = new char[Math.Max(chars, letters.Length * 2)];
+                Buffer.BlockCopy(slab, at, letters, 0, chars * 2);
+                return new string(letters, 0, chars);
             }
 
             bool ListNative(Node dir, string path)
@@ -760,8 +1100,7 @@ namespace OOutSize
                         if ((attr & Native.DIRECTORY) != 0)
                         {
                             if (name == "." || name == "..") continue;
-                            // junctions and symlinks point somewhere e;se, following them double counts or loops
-                            if ((attr & Native.REPARSE) != 0 && (fd.Tag == Native.TAG_MOUNT || fd.Tag == Native.TAG_SYMLINK))
+                            if ((attr & Native.REPARSE) != 0 && (fd.Tag & Native.SURROGATE) != 0)
                             {
                                 Interlocked.Increment(ref s.Links);
                                 continue;
@@ -776,12 +1115,16 @@ namespace OOutSize
                         else
                         {
                             long size = ((long)fd.SizeHi << 32) | fd.SizeLo;
-                            // sparse, compressed and cloud placeholder files lie about their size, ask what they really take up
+                            // this lister has no size on disk in its rows so thin files cost an extra call each
                             if ((attr & Native.THIN) != 0)
                             {
                                 uint hi;
                                 uint lo = Native.CompressedSize(longPath + (slash ? "" : "\\") + name, out hi);
-                                if (lo != 0xFFFFFFFF || Marshal.GetLastWin32Error() == 0) size = ((long)hi << 32) | lo;
+                                if (lo != 0xFFFFFFFF || Marshal.GetLastWin32Error() == 0)
+                                {
+                                    long onDisk = ((long)hi << 32) | lo;
+                                    if (onDisk < size) size = onDisk;
+                                }
                             }
                             Take(name, size, ((long)fd.WriteHi << 32) | fd.WriteLo);
                         }
@@ -833,23 +1176,12 @@ namespace OOutSize
 
             void Take(string name, long size, long stamp)
             {
-                int t = TypeOf(name);
-                if (t >= Bytes.Length)
-                {
-                    int n = Math.Max(t + 1, Bytes.Length * 2);
-                    Array.Resize(ref Bytes, n);
-                    Array.Resize(ref Count, n);
-                }
-                byte guard = shallow ? Guard.Child(below, name, inherited) : inherited;
-                if (Guard.Striped(guard)) Guarded += size;
-                Bytes[t] += size;
-                Count[t]++;
                 FileRec f;
-                f.Guard = guard;
+                f.Guard = shallow ? Guard.Child(below, name, inherited) : inherited;
                 f.Name = name;
                 f.Size = size;
                 f.Stamp = stamp;
-                f.Type = (short)t;
+                f.Type = (short)TypeOf(name);
                 files.Add(f);
             }
 
@@ -865,7 +1197,7 @@ namespace OOutSize
                 int id;
                 if (!seen.TryGetValue(ext, out id))
                 {
-                    id = s.TypeId(ext);
+                    id = s.Types.Id(ext);
                     seen[ext] = id;
                 }
                 return id;
@@ -1040,6 +1372,16 @@ namespace OOutSize
             hot = -1;
             if (r != null) r.Open = true;
             Rebuild();
+        }
+
+        // rows were taken out or a folder was swapped for a fresh copy - redo the list and stay near where we were
+        public void Reload(Node keep)
+        {
+            if (root == null) return;
+            hot = -1;
+            sel = keep != null && Tree.Under(keep, root) ? keep : root;
+            Rebuild();
+            Select(sel, false);
         }
 
         void Rebuild()
@@ -1225,7 +1567,7 @@ namespace OOutSize
                 return;
             }
             Color c = Ui.Other;
-            if (n.Kind == Node.KFile && Slot != null && n.Type >= 0 && n.Type < Slot.Length && Slot[n.Type] >= 0)
+            if (Slot != null && n.Type >= 0 && n.Type < Slot.Length && Slot[n.Type] >= 0)
                 c = Ui.TypeFill[Slot[n.Type]];
             if (n.Kind == Node.KPile) g.FillRectangle(Ui.B(Ui.Axis), x + 4, y, 9, 9);
             if (Guard.Striped(n.Guard)) g.FillRectangle(Ui.Hatch(c), x + 1, y + 2, 9, 9);
@@ -1442,6 +1784,13 @@ namespace OOutSize
         public void SetPick(Node n)
         {
             pick = n;
+            Invalidate();
+        }
+
+        public void SetSlots(sbyte[] typeSlot)
+        {
+            slot = typeSlot;
+            stale = true;
             Invalidate();
         }
 
@@ -1692,7 +2041,7 @@ namespace OOutSize
             Node c = n;
             while (c.Kind == Node.KDir && c.Kids != null && c.Kids.Length > 0) c = c.Kids[0];
             int s = -1;
-            if (c.Kind == Node.KFile && slot != null && c.Type >= 0 && c.Type < slot.Length) s = slot[c.Type];
+            if (c.Kind != Node.KDir && slot != null && c.Type >= 0 && c.Type < slot.Length) s = slot[c.Type];
             if (emph >= 0) return s == emph ? Ui.TypeFill[s] : Ui.Dim;
             return s >= 0 ? Ui.TypeFill[s] : Ui.Other;
         }
@@ -1869,6 +2218,15 @@ namespace OOutSize
         }
 
         public void SetEmphasis(int s) { emph = s; Invalidate(); }
+
+        // same types in the same colours, new sizes. the highlighted type stays highlighted
+        public void Sizes(long[] typeBytes, long otherBytes, long guardedBytes)
+        {
+            bytes = typeBytes ?? new long[0];
+            other = otherBytes;
+            guarded = guardedBytes;
+            Invalidate();
+        }
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -2083,6 +2441,9 @@ namespace OOutSize
         public string Script = "";
         public bool Backup;
         public int PerFolder = 5000;
+        public int Threads;
+        public bool Classic;
+        public bool ReadOnly;
     }
 
     internal sealed class MainForm : Form
@@ -2101,8 +2462,16 @@ namespace OOutSize
         readonly ContextMenuStrip menu = new ContextMenuStrip();
         readonly System.Windows.Forms.Timer tick = new System.Windows.Forms.Timer();
 
-        Scanner scan;
-        Node root, view;
+        Scanner scan, sub;                  // sub is a rescan of one folder inside the tree
+        Node root, view, subNode, leftover;
+        readonly List<Node> redo = new List<Node>();        // folders waiting to be scanned again
+        readonly List<string> unread = new List<string>();
+        int unreadCount, removed;
+        bool shown;
+        TypeTable types;
+        sbyte[] typeSlot = new sbyte[0];    // colour slot per file type, -1 for everything else
+        int[] slotType = new int[0];        // and back the other way for the key under the map
+        string after = "";                  // what the status line says once a rescan has settled
         Stopwatch clock = new Stopwatch();
         int split = -1;
         bool dragging;
@@ -2119,7 +2488,7 @@ namespace OOutSize
 
             notAdmin = Native.IsWindows && !elevated;
             canRestart = notAdmin && !string.IsNullOrEmpty(o.Script);
-            Text = "OOutSize" + (notAdmin ? "  (not running as administrator)" : "");
+            Text = "OOutSize" + (notAdmin ? "  (not running as administrator)" : "") + (o.ReadOnly ? "  (read only)" : "");
             AutoScaleMode = AutoScaleMode.None;
             Font = Ui.Base;
             BackColor = Ui.Plane;
@@ -2219,7 +2588,7 @@ namespace OOutSize
             b.Click += click;
         }
 
-        bool Scanning { get { return scan != null && !scan.Done; } }
+        bool Scanning { get { return sub != null || (scan != null && !scan.Done); } }
 
         protected override void OnShown(EventArgs e)
         {
@@ -2238,6 +2607,7 @@ namespace OOutSize
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             if (scan != null) scan.Cancel = true;
+            if (sub != null) sub.Cancel = true;
             tick.Stop();
             base.OnFormClosing(e);
         }
@@ -2249,6 +2619,11 @@ namespace OOutSize
             if (e.KeyCode == Keys.Escape && Scanning) { StopScan(); e.Handled = true; }
             else if (e.KeyCode == Keys.F5 && !Scanning && pathBox.Text.Trim().Length > 0) { StartScan(pathBox.Text); e.Handled = true; }
             else if (e.KeyCode == Keys.Back && !pathBox.Focused && view != null) { GoUp(); e.Handled = true; }
+            else if (e.KeyCode == Keys.Delete && !pathBox.Focused && !opt.ReadOnly && root != null && tree.Selected != null)
+            {
+                Delete(tree.Selected, e.Shift);
+                e.Handled = true;
+            }
         }
 
         // laid out by hand. dock order in winforms is a guessing game and this is th same everywhere
@@ -2313,6 +2688,13 @@ namespace OOutSize
 
             pathBox.Text = p;
             root = view = null;
+            shown = false;
+            removed = 0;
+            unreadCount = 0;
+            unread.Clear();
+            redo.Clear();
+            after = "";
+            leftover = null;
             tree.Slot = null;
             tree.SetRoot(null);
             legend.Set(null, null, 0, 0);
@@ -2326,6 +2708,8 @@ namespace OOutSize
             scan = new Scanner();
             scan.RootPath = p;
             scan.PerFolder = opt.PerFolder;
+            scan.Threads = opt.Threads;
+            scan.Classic = opt.Classic;
             clock = Stopwatch.StartNew();
             scan.Start();
             scanBtn.Text = "Stop";
@@ -2337,15 +2721,37 @@ namespace OOutSize
 
         void StopScan()
         {
-            if (scan != null) scan.Cancel = true;
+            redo.Clear();
+            if (sub != null) sub.Cancel = true;
+            else if (scan != null) scan.Cancel = true;
         }
 
         void OnTick()
         {
-            if (scan == null) { tick.Stop(); return; }
+            if (sub != null)
+            {
+                if (!sub.Done)
+                {
+                    Tell("Scanning " + sub.RootPath + " again, " + Fmt.Things(Interlocked.Read(ref sub.FilesSeen), "file", "files") + " so far");
+                    return;
+                }
+                Scanner done = sub;
+                Node was = subNode;
+                sub = null;
+                subNode = null;
+                Splice(was, done);
+                Next();
+                return;
+            }
+            if (scan == null || shown) { tick.Stop(); return; }
             if (!scan.Done) { ShowProgress(); return; }
             tick.Stop();
             Finish();
+        }
+
+        void Tell(string text)
+        {
+            status.Text = text.Replace("&", "&&");
         }
 
         void ShowProgress()
@@ -2364,41 +2770,79 @@ namespace OOutSize
         void Finish()
         {
             Scanner s = scan;
+            shown = true;
             scanBtn.Text = "Scan";
             if (s.Error != null) Say("The scan hit a problem.\r\n\r\n" + s.Error);
             root = s.Root;
             if (root == null) { map.ShowIdle(); status.Text = Hint; return; }
+            types = s.Types;
+            lock (s.Unreadable) unread.AddRange(s.Unreadable);
+            unreadCount = s.UnreadableCount;
 
-            // the four biggest file types by bytes get a colour for this scan and keep it while you zoom around
-            int n = s.TypeNames.Length;
-            sbyte[] slot = new sbyte[n];
-            for (int i = 0; i < n; i++) slot[i] = -1;
+            // the file types using the most bytes get a colour for this scan and keep it while you zoom
+            // around, delete things or scan a folder again
+            string[] all = types.Names();
+            long[] sums = new long[all.Length];
+            long striped;
+            Scanner.Tally(root, sums, out striped);
+            typeSlot = new sbyte[all.Length];
+            for (int i = 0; i < all.Length; i++) typeSlot[i] = -1;
             List<string> names = new List<string>();
-            List<long> sizes = new List<long>();
-            long coloured = 0;
+            List<int> picked = new List<int>();
             for (int k = 0; k < Ui.TypeFill.Length; k++)
             {
                 int best = -1;
-                for (int i = 0; i < n; i++)
-                    if (slot[i] < 0 && s.TypeBytes[i] > 0 && (best < 0 || s.TypeBytes[i] > s.TypeBytes[best])) best = i;
+                for (int i = 0; i < all.Length; i++)
+                    if (typeSlot[i] < 0 && sums[i] > 0 && (best < 0 || sums[i] > sums[best])) best = i;
                 if (best < 0) break;
-                slot[best] = (sbyte)k;
-                names.Add(s.TypeNames[best].Length == 0 ? "no extension" : s.TypeNames[best]);
-                sizes.Add(s.TypeBytes[best]);
-                coloured += s.TypeBytes[best];
+                typeSlot[best] = (sbyte)k;
+                names.Add(all[best].Length == 0 ? "no extension" : all[best]);
+                picked.Add(best);
             }
-            tree.Slot = slot;
-            legend.Set(names.ToArray(), sizes.ToArray(), Math.Max(0, root.Size - coloured), s.GuardedBytes);
+            slotType = picked.ToArray();
+            tree.Slot = typeSlot;
+            legend.Set(names.ToArray(), new long[names.Count], 0, 0);
             tree.SetRoot(root);
-            map.ShowMap(root, slot);
+            map.ShowMap(root, typeSlot);
             SetView(root);
-
-            long used = volTotal - volFree;
             summary.Head = s.RootPath;
-            summary.Line1 = "Scanned in " + Fmt.Secs(s.Seconds);
+            summary.VolName = Path.GetPathRoot(s.RootPath) ?? "";
+            Totals();
+            status.Text = Hint;
+            tree.Focus();
+        }
+
+        // every number that depends on what is in the tree right now. runs after a scan and again
+        // whenever something was deleted or a folder was scanned again
+        void Totals()
+        {
+            if (root == null || scan == null || types == null) return;
+            Scanner s = scan;
+            string[] all = types.Names();
+            if (all.Length > typeSlot.Length)
+            {
+                // a rescan met file types the first pass never saw. they go in with everything e;se
+                int had = typeSlot.Length;
+                Array.Resize(ref typeSlot, all.Length);
+                for (int i = had; i < all.Length; i++) typeSlot[i] = -1;
+                tree.Slot = typeSlot;
+                map.SetSlots(typeSlot);
+            }
+            long[] sums = new long[all.Length];
+            long striped;
+            Scanner.Tally(root, sums, out striped);
+            long[] sizes = new long[slotType.Length];
+            long coloured = 0;
+            for (int i = 0; i < slotType.Length; i++) { sizes[i] = sums[slotType[i]]; coloured += sizes[i]; }
+            legend.Sizes(sizes, Math.Max(0, root.Size - coloured), striped);
+
+            volKnown = VolumeSpace(s.RootPath, out volTotal, out volFree);
+            long used = volTotal - volFree;
+            summary.Line1 = "Scanned in " + Fmt.Secs(s.Seconds) + " on " + s.Crew + " threads";
             List<string> notes = new List<string>();
             if (s.Stopped) notes.Add("Stopped early so sizes are incomplete");
             if (s.Capped) notes.Add("Huge scan, small files are grouped more tightly");
+            if (removed > 0) notes.Add(Fmt.Things(removed, "item", "items") + " deleted since the scan");
             // the yellow strip already says when we are not admin, only the backup switch needs a line of its own
             if (backupOn) notes.Add("Backup privilege on");
             else if (opt.Backup) notes.Add(notAdmin ? "The backup privilege needs an admin window" : "The backup privilege could not be turned on");
@@ -2406,16 +2850,13 @@ namespace OOutSize
             summary.Bytes = root.Size;
             summary.FileCount = root.Files;
             summary.DirCount = root.Dirs;
-            summary.Unread = s.UnreadableCount;
+            summary.Unread = unreadCount;
             summary.Hidden = wholeVolume && volKnown && !s.Stopped && used - root.Size > Math.Max(256L << 20, used / 200) ? used - root.Size : 0;
             summary.HasVolume = volKnown;
             summary.VolTotal = volTotal;
             summary.VolFree = volFree;
-            summary.VolName = Path.GetPathRoot(s.RootPath) ?? "";
             summary.Ready = true;
             summary.Invalidate();
-            status.Text = Hint;
-            tree.Focus();
         }
 
         static bool VolumeSpace(string path, out long total, out long free)
@@ -2502,6 +2943,19 @@ namespace OOutSize
             menu.Items.Add("Open in Explorer", null, delegate { Reveal(it); });
             menu.Items.Add("Copy path", null, delegate { Copy(Tree.PathOf(it)); });
             if (folder != null) menu.Items.Add("Copy the listing of " + Short(folder.Name), null, delegate { Copy(Listing(folder)); });
+            if (folder != null && folder != root) menu.Items.Add("Scan " + Short(folder.Name) + " again", null, delegate { Rescan(folder); });
+            if (!opt.ReadOnly && n != root && n.Kind != Node.KPile)
+            {
+                menu.Items.Add(new ToolStripSeparator());
+                if (Guard.Striped(n.Guard) || Guard.Keep(Tree.PathOf(n)).Length > 0)
+                    menu.Items.Add("Why can this not be deleted?", null, delegate { Delete(n, false); });
+                else
+                {
+                    // both always ask first. the dots are the windows way of saying a question follows
+                    menu.Items.Add("Move to Recycle Bin...", null, delegate { Delete(n, false); });
+                    menu.Items.Add("Delete permanently...", null, delegate { Delete(n, true); });
+                }
+            }
             menu.Show(at);
         }
 
@@ -2524,6 +2978,266 @@ namespace OOutSize
                     .Append(k.Kind == Node.KFile ? "" : Fmt.Count(k.Files)).Append("\r\n");
             }
             return sb.ToString();
+        }
+
+        // ---------- deleting, and scanning one folder again
+
+        void Delete(Node n, bool forGood)
+        {
+            if (n == null || root == null || opt.ReadOnly) return;
+            if (Scanning) { Say("Wait for the scan to finish first."); return; }
+            if (n == root) { Say("OOutSize does not delete the folder a scan started in."); return; }
+            if (n.Kind == Node.KPile) { Say("That row is many small files rolled into one. Open the folder in Explorer to pick through them."); return; }
+            string path = Tree.PathOf(n);
+            bool isDir = n.Kind == Node.KDir;
+            string what = isDir ? "folder" : "file";
+
+            // windows owns it, or the machine falls over without it. no way round this one
+            string no = Guard.Striped(n.Guard) && n.Guard < Guard.Advice.Length ? Guard.Advice[n.Guard] : Guard.Keep(path);
+            if (no.Length > 0)
+            {
+                MessageBox.Show(this, "OOutSize will not delete this " + what + ".\r\n\r\n" + path + "\r\n\r\n" + no,
+                    "OOutSize", MessageBoxButtons.OK, MessageBoxIcon.Stop);
+                return;
+            }
+            if (!Native.IsWindows) { Say("Deleting only works on Windows."); return; }
+            if (!Native.Exists(path))
+            {
+                Remove(n);
+                Tell("Already gone: " + path);
+                return;
+            }
+            if (!Native.Plain(path))
+            {
+                Say("OOutSize will not delete this " + what + ".\r\n\r\n" + path + "\r\n\r\nIts name ends in a dot or a space, uses a "
+                    + "reserved name, or the path is longer than 259 characters. The Windows delete function tidies names like that "
+                    + "before it acts and could end up on a different item.");
+                return;
+            }
+
+            if (isDir && Longest(n) > 259)
+            {
+                Say("OOutSize will not delete this folder.\r\n\r\n" + path + "\r\n\r\nSomething inside it has a path longer than "
+                    + "259 characters and the Windows delete function cannot handle those. Remove the deep part another way first.");
+                return;
+            }
+
+            string care = n.Guard != 0 && n.Guard < Guard.Advice.Length ? Guard.Advice[n.Guard] : Guard.Care(path);
+            StringBuilder q = new StringBuilder();
+            if (care.Length > 0) q.Append("Careful. ").Append(care).Append("\r\n\r\n");
+            if (forGood) q.Append("Permanently delete this ").Append(what).Append(isDir ? " and everything in it?" : "?");
+            else q.Append("Move this ").Append(what).Append(" to the Recycle Bin?");
+            q.Append("\r\n\r\n").Append(path).Append("\r\n\r\nWhen scanned: ").Append(Fmt.Size(n.Size));
+            if (isDir)
+            {
+                q.Append(" in ").Append(Fmt.Things(n.Files, "file", "files"));
+                if (n.Dirs > 0) q.Append(" and ").Append(Fmt.Things(n.Dirs, "folder", "folders"));
+            }
+            q.Append("\r\n\r\n");
+            q.Append(forGood ? "This cannot be undone." : "The space is not freed until the Recycle Bin is emptied.");
+            DialogResult answer = MessageBox.Show(this, q.ToString(), forGood ? "Delete permanently" : "Move to Recycle Bin",
+                MessageBoxButtons.YesNo, forGood || care.Length > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2);
+            if (answer != DialogResult.Yes) return;
+
+            long size = n.Size;
+            bool aborted;
+            try { Native.ShellDelete(Handle, path, !forGood, out aborted); }
+            catch (Exception ex) { Say("Could not start the delete.\r\n\r\n" + ex.Message); return; }
+
+            if (!Native.Exists(path))
+            {
+                removed++;
+                after = (forGood ? "Deleted " : "Moved to the Recycle Bin: ") + path + "     " + Fmt.Size(size);
+                // on a whole drive scan the bin is in the tree, so scan it again and the bytes show up where they went
+                Node bin = forGood ? null : Bin();
+                Remove(n);
+                if (bin != null) Rescan(bin);
+            }
+            else if (isDir)
+            {
+                // cancelled, or some of it was in use. scan what is left so the numbers are true again
+                leftover = n;
+                Rescan(n);
+            }
+            else after = "Not deleted: " + path;
+            if (!Scanning && after.Length > 0) { Tell(after); after = ""; }
+            tree.Focus();
+        }
+
+        // longest full path anywhere under a row, going by what the scan saw. the files rolled into a pile
+        // have no names kept, so those cannot be counted
+        static int Longest(Node n)
+        {
+            int best = 0;
+            List<Node> stack = new List<Node>();
+            List<int> lengths = new List<int>();
+            stack.Add(n);
+            lengths.Add(Tree.PathOf(n).Length);
+            while (stack.Count > 0)
+            {
+                int last = stack.Count - 1;
+                Node d = stack[last];
+                int len = lengths[last];
+                stack.RemoveAt(last);
+                lengths.RemoveAt(last);
+                if (len > best) best = len;
+                Node[] kids = d.Kids;
+                if (kids == null) continue;
+                for (int i = 0; i < kids.Length; i++)
+                {
+                    if (kids[i].Kind == Node.KPile) continue;
+                    stack.Add(kids[i]);
+                    lengths.Add(len + 1 + kids[i].Name.Length);
+                }
+            }
+            return best;
+        }
+
+        Node Bin()
+        {
+            if (!wholeVolume || root == null || root.Kids == null) return null;
+            Node[] kids = root.Kids;
+            for (int i = 0; i < kids.Length; i++)
+                if (kids[i].Kind == Node.KDir && string.Equals(kids[i].Name, "$Recycle.Bin", StringComparison.OrdinalIgnoreCase)) return kids[i];
+            return null;
+        }
+
+        // take a row out of the tree after it was deleted on disk
+        void Remove(Node n)
+        {
+            Node up = n.Parent;
+            int at = up == null || up.Kids == null ? -1 : Array.IndexOf(up.Kids, n);
+            if (at < 0) return;
+            string path = Tree.PathOf(n);
+            Node show = Tree.Under(view, n) ? up : view;
+            Node keep = Tree.Under(tree.Selected, n) ? up : tree.Selected;
+            Node[] rest = new Node[up.Kids.Length - 1];
+            Array.Copy(up.Kids, 0, rest, 0, at);
+            Array.Copy(up.Kids, at + 1, rest, at, rest.Length - at);
+            up.Kids = rest;
+            n.Parent = null;        // cut loose, so anything sti;l holding it can tell it is no longer part of the tree
+            Forget(path);
+            Tree.Recount(up);
+            Reshow(show, keep);
+        }
+
+        // could-not-read entries under a path that is gone or about to be listed afresh
+        void Forget(string path)
+        {
+            int had = unread.Count;
+            string inside = path.EndsWith("\\", StringComparison.Ordinal) || path.EndsWith("/", StringComparison.Ordinal) ? path : path + Tree.Sep;
+            for (int i = unread.Count - 1; i >= 0; i--)
+            {
+                string u = unread[i];
+                int cut = u.IndexOf("   (error ", StringComparison.Ordinal);
+                if (cut >= 0) u = u.Substring(0, cut);
+                if (string.Equals(u, path, StringComparison.OrdinalIgnoreCase) || u.StartsWith(inside, StringComparison.OrdinalIgnoreCase)) unread.RemoveAt(i);
+            }
+            unreadCount = Math.Max(unread.Count, unreadCount - (had - unread.Count));
+        }
+
+        void Rescan(Node dir)
+        {
+            if (dir == null || root == null || dir.Kind != Node.KDir || dir == root) return;
+            if (scan != null && !scan.Done) return;
+            if (dir != subNode && !redo.Contains(dir)) redo.Add(dir);
+            if (sub == null) Next();
+        }
+
+        // start on the next folder in the queue, or settle down when there is none
+        void Next()
+        {
+            while (sub == null && redo.Count > 0)
+            {
+                Node dir = redo[0];
+                redo.RemoveAt(0);
+                if (!Tree.Under(dir, root)) continue;       // went with something deleted in the meantime
+                string p = Tree.PathOf(dir);
+                if (!Native.Exists(p)) { Remove(dir); continue; }
+                subNode = dir;
+                sub = new Scanner();
+                sub.RootPath = p;
+                sub.GuardRoot = scan.RootPath;
+                sub.Types = types;
+                sub.PerFolder = opt.PerFolder;
+                sub.Threads = opt.Threads;
+                sub.Classic = opt.Classic;
+                sub.Start();
+                scanBtn.Text = "Stop";
+                Tell("Scanning " + p + " again");
+                tick.Start();
+            }
+            if (sub != null) return;
+            tick.Stop();
+            scanBtn.Text = "Scan";
+            leftover = null;
+            if (after.Length > 0) { Tell(after); after = ""; }
+        }
+
+        // swap the fresh copy of a folder in where the old one sat
+        void Splice(Node old, Scanner done)
+        {
+            Node fresh = done.Root;
+            Node up = old == null ? null : old.Parent;
+            int at = up == null || up.Kids == null ? -1 : Array.IndexOf(up.Kids, old);
+            if (done.Stopped || done.Error != null || fresh == null || at < 0 || !Tree.Under(old, root))
+            {
+                after = "Stopped. The sizes under " + done.RootPath + " may be out of date.";
+                return;
+            }
+            Node show = Twin(view, old, fresh), keep = Twin(tree.Selected, old, fresh);
+            if (old == leftover)
+            {
+                bool same = fresh.Size == old.Size && fresh.Files == old.Files && fresh.Dirs == old.Dirs;
+                if (!same) removed++;
+                after = same ? "Nothing was deleted from " + done.RootPath
+                    : "Only part of " + done.RootPath + " was deleted. " + Fmt.Size(fresh.Size) + " is left";
+            }
+            else if (after.Length == 0) after = "Scanned " + done.RootPath + " again     " + Fmt.Size(fresh.Size);
+            fresh.Name = old.Name;
+            fresh.Parent = up;
+            fresh.Open = old.Open;
+            up.Kids[at] = fresh;
+            old.Parent = null;
+            Forget(done.RootPath);
+            lock (done.Unreadable) unread.AddRange(done.Unreadable);
+            unreadCount += done.UnreadableCount;
+            Tree.Recount(up);
+            Reshow(show, keep);
+        }
+
+        // the same spot in the fresh copy of a folder, or as near to it as sti;l exists
+        static Node Twin(Node n, Node old, Node fresh)
+        {
+            if (n == null || !Tree.Under(n, old)) return n;
+            List<Node> chain = new List<Node>();
+            for (Node p = n; p != old; p = p.Parent) chain.Add(p);
+            Node spot = fresh;
+            for (int i = chain.Count - 1; i >= 0; i--)
+            {
+                Node want = chain[i], found = null;
+                Node[] kids = spot.Kids ?? Tree.None;
+                for (int k = 0; k < kids.Length && found == null; k++)
+                    if (kids[k].Kind == want.Kind && string.Equals(kids[k].Name, want.Name, StringComparison.Ordinal)) found = kids[k];
+                if (found == null) break;
+                spot = found;
+            }
+            return spot;
+        }
+
+        // the tree changed underneath - bring the tiles, the tree, the map and the key back in line with it
+        void Reshow(Node show, Node keep)
+        {
+            Totals();
+            tree.Reload(keep);
+            Node target = show != null && Tree.Under(show, root) ? show : root;
+            if (target.Kind != Node.KDir) target = target.Parent ?? root;
+            view = null;
+            SetView(target);
+            Node pick = tree.Selected;
+            map.SetPick(pick != null && pick.Kind != Node.KDir ? pick : null);
+            Describe(pick);
         }
 
         void Copy(string text)
@@ -2563,6 +3277,10 @@ namespace OOutSize
                 string p = scan != null ? scan.RootPath : pathBox.Text.Trim();
                 if (p.Length > 0) args += " -Path " + Quote(p);
                 if (opt.Backup) args += " -BackupPrivilege";
+                if (opt.PerFolder != 5000) args += " -MaxFilesPerFolder " + opt.PerFolder;
+                if (opt.Threads > 0) args += " -Threads " + opt.Threads;
+                if (opt.Classic) args += " -ClassicScan";
+                if (opt.ReadOnly) args += " -ReadOnly";
                 ProcessStartInfo si = new ProcessStartInfo("powershell.exe", args);
                 si.UseShellExecute = true;
                 si.Verb = "runas";
@@ -2581,8 +3299,7 @@ namespace OOutSize
         void ShowUnreadable()
         {
             if (scan == null) return;
-            string[] list;
-            lock (scan.Unreadable) list = scan.Unreadable.ToArray();
+            string[] list = unread.ToArray();
             using (Form f = new Form())
             {
                 f.Text = "Folders that could not be read";
@@ -2600,7 +3317,7 @@ namespace OOutSize
                 t.BackColor = Ui.Surface;
                 string note = notAdmin ? "Not running as administrator, so some of these may just need an admin window.\r\n\r\n" : "";
                 t.Text = note + string.Join("\r\n", list)
-                    + (scan.UnreadableCount > list.Length ? "\r\n... and " + Fmt.Count(scan.UnreadableCount - list.Length) + " more" : "");
+                    + (unreadCount > list.Length ? "\r\n... and " + Fmt.Count(unreadCount - list.Length) + " more" : "");
                 t.Select(0, 0);
                 f.Controls.Add(t);
                 f.ShowDialog(this);
@@ -2615,14 +3332,22 @@ namespace OOutSize
 
     public static class Program
     {
+        // the script reads this. a powershell window that already compiled an older copy keeps that copy,
+        // and this is how the script can tell and say so
+        public const int Build = 3;
+
         // called from powershell. the window gets its own sta thread so it does not care how the host was started
-        public static void Run(string path, string script, bool backupPrivilege, int maxFilesPerFolder)
+        public static void Run(string path, string script, bool backupPrivilege, int maxFilesPerFolder, int threads,
+            bool classicScan, bool readOnly)
         {
             Options o = new Options();
             o.Path = path ?? "";
             o.Script = script ?? "";
             o.Backup = backupPrivilege;
             o.PerFolder = maxFilesPerFolder;
+            o.Threads = threads;
+            o.Classic = classicScan;
+            o.ReadOnly = readOnly;
             Thread t = new Thread(delegate() { Show(o); });
             t.SetApartmentState(ApartmentState.STA);
             t.Name = "ooutsize ui";
@@ -2652,10 +3377,18 @@ namespace OOutSize
 }
 '@
 
-# compiled once per powershell session. open a new window if you change the c# above
-if (-not ('OOutSize.Program' -as [type])) {
+# compiled once per powershell session, and a session cannot swap a compiled copy for a newer one.
+# so when an older build is already loaded in this window, say so instead of running the wrong code
+$loaded = 'OOutSize.Program' -as [type]
+if ($loaded) {
+    $build = $loaded.GetField('Build')
+    if (-not $build -or $build.GetValue($null) -ne 3) {
+        throw 'A different version of OOutSize is already loaded in this PowerShell window. Open a new PowerShell window and run it again.'
+    }
+}
+else {
     Write-Host 'Building OOutSize, this takes a second or two...'
     Add-Type -TypeDefinition $source -ReferencedAssemblies 'System.Windows.Forms', 'System.Drawing' -IgnoreWarnings
 }
 
-[OOutSize.Program]::Run($Path, [string]$PSCommandPath, [bool]$BackupPrivilege, $MaxFilesPerFolder)
+[OOutSize.Program]::Run($Path, [string]$PSCommandPath, [bool]$BackupPrivilege, $MaxFilesPerFolder, $Threads, [bool]$ClassicScan, [bool]$ReadOnly)
