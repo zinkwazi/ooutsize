@@ -31,8 +31,8 @@
       - Right click anything for Open in Explorer, Copy path, Copy listing, Scan again,
         Move to Recycle Bin and Delete permanently. Del and Shift+Del do the last two from the tree.
       - Point at a file type under the map to fade out the rest. Click it to keep it that way.
-      - Hover over a block for its name, size and date. On a Windows system file the tip also says why
-        it should not be deleted by hand.
+      - Hover over a block for its name, size and date. The folder it is in lights up and lifts off the
+        map. On a Windows system file the tip also says why it should not be deleted by hand.
       - A date in an orange tag means nothing in that folder has changed for over a year.
       - F5 scans again. Esc stops a scan and shows what it has so far.
 
@@ -1234,6 +1234,11 @@ namespace OOutSize
         public static readonly Color[] TileLight = { YellowLight, BlueLight, GreenLight, AquaLight, OrangeLight, PurpleLight, RoseLight };
         public static readonly Color[] TileBar = { Yellow, Blue, Green, Aqua, Orange, Purple, Rose };
 
+        // the folder box under the mouse turns into a tile as well, in one of these - which one goes by the top
+        // level folder it sits in. orange is left out, it is the accent and pale orange already means everything e;se
+        public static readonly Color[] CardWash = { YellowLight, BlueLight, GreenLight, AquaLight, PurpleLight, RoseLight };
+        public static readonly Color[] CardEdge = { Yellow, Blue, Green, Aqua, Purple, Rose };
+
         // arial throughout, regular and bold only, at the guide's pixel sizes: body 13, label 11.5, caption 10, heading 15 bold.
         // the tile numeral is smaller than the guide's 40 because these tiles are
         public static readonly Font Base = Make(13f, false), Bold = Make(13f, true), Label = Make(11.5f, false),
@@ -1791,6 +1796,9 @@ namespace OOutSize
     {
         public Node N;
         public int X, Y, W, H;
+        public int End;             // folders only - one past the last hit that sits inside this one
+        public byte Hue, Depth;
+        public bool Folder;         // drawn opened up, with its kids laid out inside
     }
 
     internal sealed class DriveRow
@@ -1817,7 +1825,11 @@ namespace OOutSize
         int hotDrive = -1;
         float[] rise = new float[0];        // how far each drive card has come up, 0 to 1
         readonly System.Windows.Forms.Timer anim = new System.Windows.Forms.Timer();
-        static readonly Pen Dash = MakeDash();
+        Bitmap over;                // see-through sheet the size of the map. the lit folder box gets drawn on it once
+        Rectangle glow;             // the part of that sheet with anything on it
+        Node aimedFor, litFor;
+        int gen, aimedGen = -1, litGen = -1;    // gen goes up whenever the boxes change
+        int ownAt = -1, boxAt = -1;
 
         public string BusyTitle = "", BusyLine1 = "", BusyLine2 = "";
         public double BusyShare = -1;
@@ -1837,11 +1849,11 @@ namespace OOutSize
             anim.Tick += delegate { Settle(); };
         }
 
-        static Pen MakeDash()
+        // the boxes are about to change or go, so anything worked out from them is off
+        void Wipe()
         {
-            Pen p = new Pen(Ui.Navy, 1f);
-            p.DashPattern = new float[] { 3f, 3f };
-            return p;
+            hits.Clear();
+            gen++;
         }
 
         // drive cards come up under the mouse and go back down when it leaves, over 0.18s like the guide asks
@@ -1863,7 +1875,7 @@ namespace OOutSize
         {
             mode = Idle;
             view = pick = hover = null;
-            hits.Clear();
+            Wipe();
             drives.Clear();
             try
             {
@@ -1893,7 +1905,7 @@ namespace OOutSize
         {
             mode = Busy;
             view = pick = hover = null;
-            hits.Clear();
+            Wipe();
             Invalidate();
         }
 
@@ -1905,7 +1917,7 @@ namespace OOutSize
             preview = -1;
             view = root;
             pick = hover = null;
-            hits.Clear();
+            Wipe();
             stale = true;
             Invalidate();
         }
@@ -1914,7 +1926,7 @@ namespace OOutSize
         {
             view = n;
             hover = null;
-            hits.Clear();       // the old boxes are for the old view, a mouse move before the repaint must not find them
+            Wipe();       // the old boxes are for the old view, a mouse move before the repaint must not find them
             stale = true;
             Invalidate();
         }
@@ -1953,7 +1965,7 @@ namespace OOutSize
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
-            hits.Clear();
+            Wipe();
             hover = null;
             stale = true;
         }
@@ -1961,6 +1973,7 @@ namespace OOutSize
         protected override void Dispose(bool disposing)
         {
             if (disposing && bmp != null) { bmp.Dispose(); bmp = null; }
+            if (disposing && over != null) { over.Dispose(); over = null; }
             if (disposing) anim.Dispose();
             base.Dispose(disposing);
         }
@@ -1977,25 +1990,117 @@ namespace OOutSize
             if (bmp == null) { g.Clear(Ui.White); return; }
             g.DrawImageUnscaled(bmp, 0, 0);
 
+            // the mouseover - the folder box the mouse is in lights up and lifts, and so does the one block it is on
+            if (hover != aimedFor || gen != aimedGen)
+            {
+                Aim();
+                aimedFor = hover;
+                aimedGen = gen;
+            }
+            if (boxAt >= 0 && !glow.IsEmpty)
+            {
+                GraphicsState was = g.Save();
+                g.SetClip(glow, CombineMode.Intersect);
+                g.DrawImageUnscaled(over, 0, 0);
+                g.Restore(was);
+            }
+            if (ownAt >= 0 && !hits[ownAt].Folder) Pop(g, hits[ownAt]);
+
             Rectangle r;
-            if (pick != null && FindBox(pick, out r)) Frame(g, r, true);
-            if (hover != null && hover != pick && FindBox(hover, out r)) Frame(g, r, false);
+            if (pick != null && FindBox(pick, out r)) Frame(g, r);
             if (hover != null) Tip(g);
         }
 
-        // navy is the guide's colour for a hover cursor and nothing else, a thin dashed line. what is picked gets
-        // the same line solid and doubled. white rides along so either one shows on a dark block too
-        static void Frame(Graphics g, Rectangle r, bool picked)
+        // what is picked gets a solid navy line, doubled. navy is the guide's colour for a cursor like this and
+        // nothing e;se. white rides along so it shows on a dark block too
+        static void Frame(Graphics g, Rectangle r)
         {
-            if (picked)
+            g.DrawRectangle(Ui.P(Ui.Navy), r.X, r.Y, r.Width - 1, r.Height - 1);
+            g.DrawRectangle(Ui.P(Ui.Navy), r.X + 1, r.Y + 1, r.Width - 3, r.Height - 3);
+            g.DrawRectangle(Ui.P(Ui.White), r.X + 2, r.Y + 2, r.Width - 5, r.Height - 5);
+        }
+
+        // which box the mouse is on, and which opened-up folder that sits in (itself, when it is one). -1 for none
+        void Aim()
+        {
+            ownAt = boxAt = -1;
+            if (hover != null)
+                for (int i = hits.Count - 1; i >= 0; i--) if (hits[i].N == hover) { ownAt = i; break; }
+            // hits are in the order things got drawn - a folder first, then everything inside it up to its End
+            for (int i = ownAt; i >= 0; i--)
+                if (hits[i].Folder && hits[i].End > ownAt) { boxAt = i; break; }
+            if (boxAt < 0)
             {
-                g.DrawRectangle(Ui.P(Ui.Navy), r.X, r.Y, r.Width - 1, r.Height - 1);
-                g.DrawRectangle(Ui.P(Ui.Navy), r.X + 1, r.Y + 1, r.Width - 3, r.Height - 3);
-                g.DrawRectangle(Ui.P(Ui.White), r.X + 2, r.Y + 2, r.Width - 5, r.Height - 5);
+                glow = Rectangle.Empty;
+                litFor = null;
                 return;
             }
-            g.DrawRectangle(Ui.P(Ui.White), r.X, r.Y, r.Width - 1, r.Height - 1);
-            g.DrawRectangle(Dash, r.X, r.Y, r.Width - 1, r.Height - 1);
+            if (hits[boxAt].N != litFor || litGen != gen) Light(hits[boxAt], boxAt);
+        }
+
+        // the folder box the mouse is in turns into one of the guide's tiles and comes up off the map: its own light
+        // colour behind the kids, the 3px bar on top, a touch bigger than it was and a shadow under it. the kids are
+        // cut out as holes so the map shows through them, which keeps this quick however much is inside
+        void Light(Hit f, int at)
+        {
+            if (over == null || over.Width != bmp.Width || over.Height != bmp.Height)
+            {
+                if (over != null) over.Dispose();
+                over = new Bitmap(bmp.Width, bmp.Height, PixelFormat.Format32bppPArgb);
+                over.SetResolution(bmp.HorizontalResolution, bmp.VerticalResolution);
+            }
+            bool headed = f.W >= 70 && f.H >= 46;
+            int x = f.X - 2, y = f.Y - 2, w = f.W + 4, h = f.H + 4;
+            float r = headed ? 6f : 3f;
+            Color wash = Ui.CardWash[f.Hue];
+            List<Rectangle> holes = new List<Rectangle>();
+            for (int i = at + 1; i < f.End && i < hits.Count; )
+            {
+                Hit kid = hits[i];
+                holes.Add(new Rectangle(kid.X, kid.Y, kid.W, kid.H));
+                i = kid.Folder ? Math.Max(kid.End, i + 1) : i + 1;
+            }
+            using (Graphics g = Graphics.FromImage(over))
+            {
+                g.Clear(Color.Transparent);
+                g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+                Shade(g, x, y, w, h, r, 3f, 9, 80);
+                if (headed)
+                {
+                    Ui.Tile(g, x, y, w, h, wash, Ui.CardEdge[f.Hue]);
+                    // green-light is the one light background too dark for the grey, so the size goes graphite there
+                    NameRow(g, f.N, f.X, f.Y, f.W, f.Depth == 1, wash == Ui.GreenLight ? Ui.Graphite : Ui.Gray);
+                }
+                else Ui.Box(g, x, y, w, h, r, wash, Color.Empty);
+                if (holes.Count > 0)
+                {
+                    g.CompositingMode = CompositingMode.SourceCopy;
+                    g.FillRectangles(Ui.B(Color.Transparent), holes.ToArray());
+                }
+            }
+            glow = Rectangle.Intersect(new Rectangle(x - 13, y - 13, w + 26, h + 26), new Rectangle(0, 0, over.Width, over.Height));
+            litFor = f.N;
+            litGen = gen;
+        }
+
+        // the one block the mouse is on comes up as well - a pixel bigger all round, a white rim and a small shadow
+        void Pop(Graphics g, Hit h)
+        {
+            int x = h.X - 2, y = h.Y - 2, w = h.W + 4, tall = h.H + 4;
+            Shade(g, x, y, w, tall, 1f, 2f, 5, 100);
+            g.FillRectangle(Ui.B(Ui.White), x, y, w, tall);
+            Leaf(g, h.N, h.X, h.Y, h.W, h.H, 1);
+        }
+
+        // shadow under something that has come up off the map. the middle is left out - whatever came up covers
+        // it anyway - so a big box costs no more than a small one
+        static void Shade(Graphics g, int x, int y, int w, int h, float r, float drop, int spread, int alpha)
+        {
+            GraphicsState was = g.Save();
+            int rim = (int)r + 2;
+            if (w > 2 * rim && h > 2 * rim) g.SetClip(new Rectangle(x + rim, y + rim, w - 2 * rim, h - 2 * rim), CombineMode.Exclude);
+            Ui.Shadow(g, x, y, w, h, r, drop, spread, alpha);
+            g.Restore(was);
         }
 
         // the thing itself may be too small to have a box of its own, so walk up til something does
@@ -2072,13 +2177,13 @@ namespace OOutSize
                 bmp = new Bitmap(W, H, PixelFormat.Format32bppPArgb);
                 bmp.SetResolution(dpiX, dpiY);      // same dpi as the screen or the blit below gets stretched
             }
-            hits.Clear();
+            Wipe();
             using (Graphics g = Graphics.FromImage(bmp))
             {
                 g.Clear(Ui.White);
                 g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
                 if (view != null && view.Size > 0 && view.Kids != null && view.Kids.Length > 0)
-                    Lay(g, view, 3, 3, W - 6, H - 6, 0);
+                    Lay(g, view, 3, 3, W - 6, H - 6, 0, 0);
                 else
                     Ui.Text(g, view == null ? "" : "Nothing in here takes up any space", Ui.Base, Ui.Gray, 0, 0, W, H, Ui.Mid);
             }
@@ -2086,7 +2191,7 @@ namespace OOutSize
         }
 
         // squarified treemap - fill rows along the short side and stop adding to a row once the blocks start getting skinnier
-        void Lay(Graphics g, Node dir, double x, double y, double w, double h, int depth)
+        void Lay(Graphics g, Node dir, double x, double y, double w, double h, int depth, int hue)
         {
             Node[] kids = dir.Kids;
             double remain = dir.Size;
@@ -2122,7 +2227,7 @@ namespace OOutSize
                     pos += len;
                     int x0 = (int)Math.Round(rx), y0 = (int)Math.Round(ry);
                     int x1 = (int)Math.Round(rx + rw), y1 = (int)Math.Round(ry + rh);
-                    if (x1 > x0 && y1 > y0) Block(g, kids[k], x0, y0, x1 - x0, y1 - y0, depth + 1);
+                    if (x1 > x0 && y1 > y0) Block(g, kids[k], x0, y0, x1 - x0, y1 - y0, depth + 1, depth == 0 ? k % Ui.CardWash.Length : hue);
                     remain -= kids[k].Size;
                 }
                 if (wide) { x += thick; w -= thick; } else { y += thick; h -= thick; }
@@ -2130,7 +2235,7 @@ namespace OOutSize
             }
         }
 
-        void Block(Graphics g, Node n, int x, int y, int w, int h, int depth)
+        void Block(Graphics g, Node n, int x, int y, int w, int h, int depth, int hue)
         {
             // neighbours are kept apart by a gap, not by borders drawn round them
             int gx = w >= 8 ? 1 : 0, gy = h >= 8 ? 1 : 0;
@@ -2143,16 +2248,8 @@ namespace OOutSize
             bool folder = Tree.HasKids(n) && n.Size > 0;
             if (!folder || bw < 12 || bh < 12)
             {
-                bool faded;
-                Color fill = Fill(n, out faded);
-                g.FillRectangle(Ui.B(fill), bx, by, bw, bh);
-                Note(n, bx, by, bw, bh);
-                if (bw >= 46 && bh >= 18 && !faded)
-                {
-                    Color ink = Ui.InkOn(fill);
-                    Ui.Text(g, n.Name, Ui.Label, ink, bx + 4, by + 1, bw - 7, 16, Ui.Left);
-                    if (bh >= 34) Ui.Text(g, Fmt.Size(n.Size), Ui.Label, ink, bx + 4, by + 15, bw - 7, 16, Ui.Left);
-                }
+                Leaf(g, n, bx, by, bw, bh, 0);
+                Note(n, bx, by, bw, bh, depth, hue, false);
                 return;
             }
 
@@ -2161,36 +2258,59 @@ namespace OOutSize
             bool roomForHead = bw >= 70 && bh >= 46;
             if (!roomForHead && n.Kids.Length == 1 && Tree.HasKids(n.Kids[0]))
             {
-                Block(g, n.Kids[0], x, y, w, h, depth);
+                Block(g, n.Kids[0], x, y, w, h, depth, hue);
                 return;
             }
 
             // a folder is a white box with a hairline round it and its kids laid out inside. it gets no fill of its
-            // own - colour in the map is for the files. top level folders get the firmer line, round corners and a bold name
+            // own - colour in the map is for the files, and for the folder the mouse is in (see Light). top level
+            // folders get the firmer line, round corners and a bold name
             bool outer = depth == 1 && roomForHead;
             bool lined = bw >= 24 && bh >= 24;
             if (outer) Ui.Box(g, bx, by, bw, bh, 6f, Ui.White, Ui.GrayBorder);
             else if (lined) g.DrawRectangle(Ui.P(Ui.GrayLine), bx, by, bw - 1, bh - 1);
-            Note(n, bx, by, bw, bh);
+            int at = Note(n, bx, by, bw, bh, depth, hue, true);
             int head = 0, pad = 1;
             if (roomForHead)
             {
                 head = 19;
                 pad = 3;
-                Font face = outer ? Ui.LabelBold : Ui.Label;
-                if (bw >= 150)
-                {
-                    Ui.Text(g, Fmt.Size(n.Size), Ui.Label, Ui.Gray, bx + bw - 80, by + 1, 74, 18, Ui.Right);
-                    Ui.Text(g, n.Name, face, Ui.Graphite, bx + 6, by + 1, bw - 92, 18, Ui.Left);
-                }
-                else Ui.Text(g, n.Name, face, Ui.Graphite, bx + 6, by + 1, bw - 11, 18, Ui.Left);
+                NameRow(g, n, bx, by, bw, outer, Ui.Gray);
             }
             else if (lined) pad = 2;
             int topPad = head > 0 ? head : pad;
-            Lay(g, n, bx + pad, by + topPad, bw - 2 * pad, bh - topPad - pad, depth);
+            Lay(g, n, bx + pad, by + topPad, bw - 2 * pad, bh - topPad - pad, depth, hue);
+            Hit me = hits[at];
+            me.End = hits.Count;
+            hits[at] = me;
         }
 
-        void Note(Node n, int x, int y, int w, int h)
+        // one file, or a folder too small to open up - a flat block in the colour of its type, named when there is
+        // room. grow draws it that many pixels bigger all round and leaves the words where they were
+        void Leaf(Graphics g, Node n, int bx, int by, int bw, int bh, int grow)
+        {
+            bool faded;
+            Color fill = Fill(n, out faded);
+            g.FillRectangle(Ui.B(fill), bx - grow, by - grow, bw + 2 * grow, bh + 2 * grow);
+            if (bw < 46 || bh < 18 || faded) return;
+            Color ink = Ui.InkOn(fill);
+            Ui.Text(g, n.Name, Ui.Label, ink, bx + 4, by + 1, bw - 7, 16, Ui.Left);
+            if (bh >= 34) Ui.Text(g, Fmt.Size(n.Size), Ui.Label, ink, bx + 4, by + 15, bw - 7, 16, Ui.Left);
+        }
+
+        // top row of a folder box - its name, and its size on the right when there is room for both
+        static void NameRow(Graphics g, Node n, int bx, int by, int bw, bool outer, Color soft)
+        {
+            Font face = outer ? Ui.LabelBold : Ui.Label;
+            if (bw >= 150)
+            {
+                Ui.Text(g, Fmt.Size(n.Size), Ui.Label, soft, bx + bw - 80, by + 1, 74, 18, Ui.Right);
+                Ui.Text(g, n.Name, face, Ui.Graphite, bx + 6, by + 1, bw - 92, 18, Ui.Left);
+            }
+            else Ui.Text(g, n.Name, face, Ui.Graphite, bx + 6, by + 1, bw - 11, 18, Ui.Left);
+        }
+
+        int Note(Node n, int x, int y, int w, int h, int depth, int hue, bool folder)
         {
             Hit hit;
             hit.N = n;
@@ -2198,7 +2318,12 @@ namespace OOutSize
             hit.Y = y;
             hit.W = w;
             hit.H = h;
+            hit.End = 0;
+            hit.Hue = (byte)hue;
+            hit.Depth = (byte)Math.Min(depth, 255);
+            hit.Folder = folder;
             hits.Add(hit);
+            return hits.Count - 1;
         }
 
         Color Fill(Node n, out bool faded)
@@ -3623,7 +3748,7 @@ namespace OOutSize
         // the script reads this. a powershell window that already compiled an older copy keeps that copy,
         // and this is how the script can tell and say so. goes up every time the c# changes - the number in
         // the script's ;ast few lines has to match
-        public const int Build = 5;
+        public const int Build = 6;
 
         // called from powershell. the window gets its own sta thread so it does not care how the host was started
         public static void Run(string path, string script, bool backupPrivilege, int maxFilesPerFolder, int threads,
@@ -3671,7 +3796,7 @@ namespace OOutSize
 $loaded = 'OOutSize.Program' -as [type]
 if ($loaded) {
     $build = $loaded.GetField('Build')
-    if (-not $build -or $build.GetValue($null) -ne 5) {
+    if (-not $build -or $build.GetValue($null) -ne 6) {
         throw 'A different version of OOutSize is already loaded in this PowerShell window. Open a new PowerShell window and run it again.'
     }
 }

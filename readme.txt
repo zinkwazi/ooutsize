@@ -76,11 +76,15 @@ Left side, the tree
 Right side, the map
 
 - Every block is a file or folder and its area is its size
-- Each top level folder gets its own soft colour, with its contents laid
-  out inside
+- A folder is a white box with a thin outline and its contents laid out
+  inside. The colour is on the files
+- Move the mouse over the map and the folder it is in lights up and lifts
+  off the page with a shadow. So does the block under the mouse. Each top
+  level folder has its own colour for this
 - The seven file types using the most space each get a colour. The key is
   under the map. Everything else is pale orange
-- Striped blocks are Windows system files, see below
+- Windows system files look like any other block. Hover over one and it
+  says what it is, see System files below
 
 
 Mouse and keys
@@ -122,7 +126,7 @@ button.
 
 What OOutSize will not delete
 
-- Anything striped, see System files below
+- Windows system files, see System files below
 - These whole folders on the Windows drive: Users, ProgramData,
   ProgramData\Microsoft, Program Files and Program Files (x86). Things
   inside them can be deleted
@@ -151,19 +155,20 @@ System files
 ------------
 
 Some of the biggest things on a Windows drive must not be deleted by hand.
-Hover over one and OOutSize says why and what to do instead.
+They are not marked in the map. Hover over one and OOutSize says why to
+leave it alone and what to do instead.
 
-Striped, because they belong to Windows. Delete is switched off for these
+Delete is switched off for these, because they belong to Windows
 
 - Windows, including WinSxS, Installer and SoftwareDistribution
 - pagefile.sys, swapfile.sys and hiberfil.sys
 - System Volume Information, Recovery, Boot and EFI
 
-Inside Windows these are not striped, because they only hold temporary
-files, logs and crash dumps: Temp, Logs, Minidump, LiveKernelReports and
-MEMORY.DMP.
+Inside Windows these carry no warning and can be deleted, because they
+only hold temporary files, logs and crash dumps: Temp, Logs, Minidump,
+LiveKernelReports and MEMORY.DMP.
 
-Not striped, but a warning shows when you hover or delete
+For these a warning shows when you hover or delete
 
 - Program Files and Program Files (x86)
 - ProgramData\Microsoft and ProgramData\Package Cache
