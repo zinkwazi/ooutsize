@@ -31,7 +31,8 @@
       - Right click anything for Open in Explorer, Copy path, Copy listing, Scan again,
         Move to Recycle Bin and Delete permanently. Del and Shift+Del do the last two from the tree.
       - Point at a file type under the map to fade out the rest. Click it to keep it that way.
-      - Striped blocks belong to Windows. Hover over one to see why it should not be deleted by hand.
+      - Hover over a block for its name, size and date. On a Windows system file the tip also says why
+        it should not be deleted by hand.
       - A date in an orange tag means nothing in that folder has changed for over a year.
       - F5 scans again. Esc stops a scan and shows what it has so far.
 
@@ -268,10 +269,10 @@ namespace OOutSize
 
         static readonly Dictionary<string, byte> rules = Build();
 
-        // windows itself, the page and hibernation files, shadow copies and boot files get striped, and delete
-        // refuses them. program files, programdata, the recycle bin and upgrade leftovers keep the warning but
-        // look like everything e;se and can be deleted after a sterner question
-        public static bool Striped(byte id)
+        // windows itself, the page and hibernation files, shadow copies and boot files - delete refuses these.
+        // program files, programdata, the recycle bin and upgrade leftovers keep the warning but can be deleted
+        // after a sterner question. none of it is drawn any different, the mouseover is what te;ls you
+        public static bool HandsOff(byte id)
         {
             return id != 0 && id != 5 && id != 6 && id != 7 && id != 9 && id != 13;
         }
@@ -806,9 +807,8 @@ namespace OOutSize
 
         // what each file type adds up to, read off the finished tree so it still holds after rows get
         // removed or a folder is scanned again. a pile only counts when everything in it is one type
-        public static void Tally(Node top, long[] bytes, out long guarded)
+        public static void Tally(Node top, long[] bytes)
         {
-            guarded = 0;
             List<Node> stack = new List<Node>();
             stack.Add(top);
             while (stack.Count > 0)
@@ -822,7 +822,6 @@ namespace OOutSize
                     continue;
                 }
                 if (n.Type >= 0 && n.Type < bytes.Length) bytes[n.Type] += n.Size;
-                if (Guard.Striped(n.Guard)) guarded += n.Size;
             }
         }
 
@@ -1235,11 +1234,6 @@ namespace OOutSize
         public static readonly Color[] TileLight = { YellowLight, BlueLight, GreenLight, AquaLight, OrangeLight, PurpleLight, RoseLight };
         public static readonly Color[] TileBar = { Yellow, Blue, Green, Aqua, Orange, Purple, Rose };
 
-        // top level folders in the map are tiles too. orange is left out of those, it is the accent and
-        // pale orange already means everything e;se
-        public static readonly Color[] CardWash = { YellowLight, BlueLight, GreenLight, AquaLight, PurpleLight, RoseLight };
-        public static readonly Color[] CardEdge = { Yellow, Blue, Green, Aqua, Purple, Rose };
-
         // arial throughout, regular and bold only, at the guide's pixel sizes: body 13, label 11.5, caption 10, heading 15 bold.
         // the tile numeral is smaller than the guide's 40 because these tiles are
         public static readonly Font Base = Make(13f, false), Bold = Make(13f, true), Label = Make(11.5f, false),
@@ -1247,21 +1241,6 @@ namespace OOutSize
 
         public static readonly StringFormat Left = Format(StringAlignment.Near), Right = Format(StringAlignment.Far),
             Mid = Format(StringAlignment.Center), Wrap = new StringFormat();
-
-        // stripes mean windows owns it - hands off. the block keeps its own colour underneath
-        static readonly Dictionary<int, HatchBrush> hatches = new Dictionary<int, HatchBrush>();
-
-        public static HatchBrush Hatch(Color c)
-        {
-            HatchBrush b;
-            int key = c.ToArgb();
-            if (hatches.TryGetValue(key, out b)) return b;
-            // stripe is the fill pulled towards white, or towards graphite when the fill is already pale
-            bool pale = InkOn(c) == Graphite;
-            b = new HatchBrush(HatchStyle.WideUpwardDiagonal, Mix(c, pale ? Graphite : White, pale ? 0.30 : 0.45), c);
-            hatches[key] = b;
-            return b;
-        }
 
         static readonly Dictionary<int, SolidBrush> brushes = new Dictionary<int, SolidBrush>();
         static readonly Dictionary<int, Pen> pens = new Dictionary<int, Pen>();
@@ -1435,7 +1414,8 @@ namespace OOutSize
             g.PixelOffsetMode = pm;
         }
 
-        // a meter - square where it starts, round where it ends, on the light background of its own colour
+        // a meter - square where it starts, round where it ends. the track behind it is the pale neutral,
+        // so the only colour is the part that measures something
         public static void Bar(Graphics g, int x, int y, int w, int h, double share, Color fill, Color track)
         {
             Pill(g, B(track), x, y, w, h);
@@ -1657,8 +1637,8 @@ namespace OOutSize
                 Ui.Text(g, Fmt.Size(n.Size), Ui.Base, Ui.Graphite, xSize, y, 70, RowH, Ui.Right);
                 double share = Share(n);
                 Ui.Text(g, Fmt.Pct(share), Ui.Base, Ui.Gray, xPct, y, 46, RowH, Ui.Right);
-                // one series of bars, so it takes the first colour in the guide's order on that colour's own light background
-                Ui.Bar(g, xBar + 8, y + 7, 72, 8, share, Ui.Yellow, Ui.YellowLight);
+                // one series of bars, so it takes the first colour in the guide's order
+                Ui.Bar(g, xBar + 8, y + 7, 72, 8, share, Ui.Yellow, Ui.GrayLight);
                 if (xFiles >= 0 && n.Kind != Node.KFile) Ui.Text(g, Fmt.Count(n.Files), Ui.Base, Ui.Gray, xFiles, y, 62, RowH, Ui.Right);
                 if (xDate >= 0 && n.Stamp > 0 && n.Stamp < stale)
                 {
@@ -1688,8 +1668,8 @@ namespace OOutSize
         {
             if (n.Kind == Node.KDir)
             {
-                // little folder shape in yellow. striped when windows owns it, orange when it could not be read
-                Brush b = n.Denied ? Ui.B(Ui.Orange) : (Guard.Striped(n.Guard) ? (Brush)Ui.Hatch(Ui.Yellow) : Ui.B(Ui.Yellow));
+                // little folder shape in yellow, orange when it could not be read
+                Brush b = Ui.B(n.Denied ? Ui.Orange : Ui.Yellow);
                 g.FillRectangle(b, x, y + 1, 6, 3);
                 g.FillRectangle(b, x, y + 3, 13, 8);
                 return;
@@ -1698,8 +1678,7 @@ namespace OOutSize
             if (Slot != null && n.Type >= 0 && n.Type < Slot.Length && Slot[n.Type] >= 0)
                 c = Ui.TypeFill[Slot[n.Type]];
             if (n.Kind == Node.KPile) g.FillRectangle(Ui.B(Ui.GrayBorder), x + 4, y, 9, 9);
-            if (Guard.Striped(n.Guard)) g.FillRectangle(Ui.Hatch(c), x + 1, y + 2, 9, 9);
-            else g.FillRectangle(Ui.B(c), x + 1, y + 2, 9, 9);
+            g.FillRectangle(Ui.B(c), x + 1, y + 2, 9, 9);
         }
 
         int RowAt(int y)
@@ -2099,7 +2078,7 @@ namespace OOutSize
                 g.Clear(Ui.White);
                 g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
                 if (view != null && view.Size > 0 && view.Kids != null && view.Kids.Length > 0)
-                    Lay(g, view, 3, 3, W - 6, H - 6, 0, 0);
+                    Lay(g, view, 3, 3, W - 6, H - 6, 0);
                 else
                     Ui.Text(g, view == null ? "" : "Nothing in here takes up any space", Ui.Base, Ui.Gray, 0, 0, W, H, Ui.Mid);
             }
@@ -2107,7 +2086,7 @@ namespace OOutSize
         }
 
         // squarified treemap - fill rows along the short side and stop adding to a row once the blocks start getting skinnier
-        void Lay(Graphics g, Node dir, double x, double y, double w, double h, int depth, int hue)
+        void Lay(Graphics g, Node dir, double x, double y, double w, double h, int depth)
         {
             Node[] kids = dir.Kids;
             double remain = dir.Size;
@@ -2143,7 +2122,7 @@ namespace OOutSize
                     pos += len;
                     int x0 = (int)Math.Round(rx), y0 = (int)Math.Round(ry);
                     int x1 = (int)Math.Round(rx + rw), y1 = (int)Math.Round(ry + rh);
-                    if (x1 > x0 && y1 > y0) Block(g, kids[k], x0, y0, x1 - x0, y1 - y0, depth + 1, depth == 0 ? k % Ui.CardWash.Length : hue);
+                    if (x1 > x0 && y1 > y0) Block(g, kids[k], x0, y0, x1 - x0, y1 - y0, depth + 1);
                     remain -= kids[k].Size;
                 }
                 if (wide) { x += thick; w -= thick; } else { y += thick; h -= thick; }
@@ -2151,7 +2130,7 @@ namespace OOutSize
             }
         }
 
-        void Block(Graphics g, Node n, int x, int y, int w, int h, int depth, int hue)
+        void Block(Graphics g, Node n, int x, int y, int w, int h, int depth)
         {
             // neighbours are kept apart by a gap, not by borders drawn round them
             int gx = w >= 8 ? 1 : 0, gy = h >= 8 ? 1 : 0;
@@ -2166,8 +2145,7 @@ namespace OOutSize
             {
                 bool faded;
                 Color fill = Fill(n, out faded);
-                if (Guard.Striped(n.Guard) && Shown < 0) g.FillRectangle(Ui.Hatch(fill), bx, by, bw, bh);
-                else g.FillRectangle(Ui.B(fill), bx, by, bw, bh);
+                g.FillRectangle(Ui.B(fill), bx, by, bw, bh);
                 Note(n, bx, by, bw, bh);
                 if (bw >= 46 && bh >= 18 && !faded)
                 {
@@ -2183,36 +2161,33 @@ namespace OOutSize
             bool roomForHead = bw >= 70 && bh >= 46;
             if (!roomForHead && n.Kids.Length == 1 && Tree.HasKids(n.Kids[0]))
             {
-                Block(g, n.Kids[0], x, y, w, h, depth, hue);
+                Block(g, n.Kids[0], x, y, w, h, depth);
                 return;
             }
 
-            // a folder is one of the guide's tiles with its kids laid out inside: the light background of its top level
-            // folder's colour, and at the top level the 3px bar and the round corners as well. every other level down
-            // goes white so the nesting shows
-            bool tinted = (depth & 1) == 1;
-            Color ground = tinted ? Ui.CardWash[hue] : Ui.White;
-            int edge = depth == 1 && roomForHead ? 3 : 0;
-            if (edge > 0) Ui.Tile(g, bx, by, bw, bh, ground, Ui.CardEdge[hue]);
-            else g.FillRectangle(Ui.B(ground), bx, by, bw, bh);
+            // a folder is a white box with a hairline round it and its kids laid out inside. it gets no fill of its
+            // own - colour in the map is for the files. top level folders get the firmer line, round corners and a bold name
+            bool outer = depth == 1 && roomForHead;
+            bool lined = bw >= 24 && bh >= 24;
+            if (outer) Ui.Box(g, bx, by, bw, bh, 6f, Ui.White, Ui.GrayBorder);
+            else if (lined) g.DrawRectangle(Ui.P(Ui.GrayLine), bx, by, bw - 1, bh - 1);
             Note(n, bx, by, bw, bh);
             int head = 0, pad = 1;
             if (roomForHead)
             {
-                head = 18 + edge;
+                head = 19;
                 pad = 3;
-                // green-light is the one light background too dark for the grey, so the size goes graphite there
-                Color soft = tinted && ground == Ui.GreenLight ? Ui.Graphite : Ui.Gray;
+                Font face = outer ? Ui.LabelBold : Ui.Label;
                 if (bw >= 150)
                 {
-                    Ui.Text(g, Fmt.Size(n.Size), Ui.Label, soft, bx + bw - 80, by + edge, 74, 18, Ui.Right);
-                    Ui.Text(g, n.Name, Ui.Label, Ui.Graphite, bx + 6, by + edge, bw - 92, 18, Ui.Left);
+                    Ui.Text(g, Fmt.Size(n.Size), Ui.Label, Ui.Gray, bx + bw - 80, by + 1, 74, 18, Ui.Right);
+                    Ui.Text(g, n.Name, face, Ui.Graphite, bx + 6, by + 1, bw - 92, 18, Ui.Left);
                 }
-                else Ui.Text(g, n.Name, Ui.Label, Ui.Graphite, bx + 6, by + edge, bw - 11, 18, Ui.Left);
+                else Ui.Text(g, n.Name, face, Ui.Graphite, bx + 6, by + 1, bw - 11, 18, Ui.Left);
             }
-            else if (bw >= 24 && bh >= 24) pad = 2;
+            else if (lined) pad = 2;
             int topPad = head > 0 ? head : pad;
-            Lay(g, n, bx + pad, by + topPad, bw - 2 * pad, bh - topPad - pad, depth, hue);
+            Lay(g, n, bx + pad, by + topPad, bw - 2 * pad, bh - topPad - pad, depth);
         }
 
         void Note(Node n, int x, int y, int w, int h)
@@ -2248,7 +2223,7 @@ namespace OOutSize
             int bw = Math.Max(120, Math.Min(480, W - 80));
             int x = (W - bw) / 2, y = Math.Max(20, H / 2 - 70);
             Ui.Text(g, BusyTitle, Ui.Head, Ui.Graphite, 20, y, W - 40, 28, Ui.Mid);
-            if (BusyShare >= 0) Ui.Bar(g, x, y + 42, bw, 8, BusyShare, Ui.Yellow, Ui.YellowLight);
+            if (BusyShare >= 0) Ui.Bar(g, x, y + 42, bw, 8, BusyShare, Ui.Yellow, Ui.GrayLight);
             Ui.Text(g, BusyLine1, Ui.Base, Ui.Graphite, 20, y + 60, W - 40, 20, Ui.Mid);
             Ui.Text(g, BusyLine2, Ui.Label, Ui.Gray, 20, y + 82, W - 40, 18, Ui.Mid);
             Ui.Text(g, "Esc or the Stop button ends the scan early and shows what it has so far", Ui.Label, Ui.Gray, 20, y + 112, W - 40, 18, Ui.Mid);
@@ -2278,7 +2253,7 @@ namespace OOutSize
                 bool tight = d.Total > 0 && (double)d.Free / d.Total < 0.10;
                 string name = string.IsNullOrEmpty(d.Label) || d.Label == d.Root ? d.Root : d.Root + "   " + d.Label;
                 Ui.Text(g, name, Ui.Head, Ui.Graphite, 38, cy + 10, rowW - 28, 22, Ui.Left);
-                Ui.Bar(g, 38, (int)Math.Round(cy) + 37, rowW - 28, 8, used, tight ? Ui.Red : Ui.Yellow, tight ? Ui.RedLight : Ui.YellowLight);
+                Ui.Bar(g, 38, (int)Math.Round(cy) + 37, rowW - 28, 8, used, tight ? Ui.Red : Ui.Yellow, Ui.GrayLight);
                 string line = Fmt.Size(d.Free) + " free of " + Fmt.Size(d.Total);
                 // bad is red and always comes with a mark in front, so it never rests on the colour alone
                 if (low) line = "\u25BC Low on space   " + line;
@@ -2386,7 +2361,7 @@ namespace OOutSize
     {
         string[] names = new string[0];
         long[] bytes = new long[0];
-        long other, guarded;
+        long other;
         int emph = -1, hot = -1;
         readonly List<Rectangle> boxes = new List<Rectangle>();
 
@@ -2400,12 +2375,11 @@ namespace OOutSize
             BackColor = Ui.White;
         }
 
-        public void Set(string[] typeNames, long[] typeBytes, long otherBytes, long guardedBytes)
+        public void Set(string[] typeNames, long[] typeBytes, long otherBytes)
         {
             names = typeNames ?? new string[0];
             bytes = typeBytes ?? new long[0];
             other = otherBytes;
-            guarded = guardedBytes;
             emph = -1;
             hot = -1;
             Invalidate();
@@ -2414,11 +2388,10 @@ namespace OOutSize
         public void SetEmphasis(int s) { emph = s; Invalidate(); }
 
         // same types in the same colours, new sizes. the highlighted type stays highlighted
-        public void Sizes(long[] typeBytes, long otherBytes, long guardedBytes)
+        public void Sizes(long[] typeBytes, long otherBytes)
         {
             bytes = typeBytes ?? new long[0];
             other = otherBytes;
-            guarded = guardedBytes;
             Invalidate();
         }
 
@@ -2434,13 +2407,13 @@ namespace OOutSize
             int h = 24, x = 10, y = 3;
             Ui.Text(g, "File types", Ui.Label, Ui.Gray, x, y, 64, h, Ui.Left);
             x += 68;
-            // each coloured type, then everything else, then the striped system pile. wraps onto a second row
-            int count = names.Length + 2;
+            // each coloured type, then everything else. wraps onto a second row
+            int count = names.Length + 1;
             for (int i = 0; i < count; i++)
             {
-                long size = i < names.Length ? bytes[i] : (i == names.Length ? other : guarded);
+                long size = i < names.Length ? bytes[i] : other;
                 if (i >= names.Length && size <= 0) { boxes.Add(Rectangle.Empty); continue; }
-                string label = Label(i);
+                string label = i < names.Length ? names[i] : "everything else";
                 string amount = Fmt.Size(size);
                 Font face = i == emph ? Ui.LabelBold : Ui.Label;
                 int lw = Ui.Width(g, label, face), sw = Ui.Width(g, amount, Ui.Label);
@@ -2448,23 +2421,13 @@ namespace OOutSize
                 if (x + w > ClientSize.Width && x > 78) { x = 78; y += h; }
                 if (y + h > ClientSize.Height + 2) break;
                 bool dimmed = shown >= 0 && i != shown && i < names.Length;
-                if (i > names.Length) g.FillRectangle(Ui.Hatch(Ui.TypeFill[0]), x, y + h / 2 - 5, 10, 10);
-                else
-                {
-                    Color c = i == names.Length ? Ui.Other : (dimmed ? Ui.TypeDim[i] : Ui.TypeFill[i]);
-                    Ui.Box(g, x, y + h / 2 - 5, 10, 10, 1, c, Color.Empty);
-                }
+                Color c = i == names.Length ? Ui.Other : (dimmed ? Ui.TypeDim[i] : Ui.TypeFill[i]);
+                Ui.Box(g, x, y + h / 2 - 5, 10, 10, 1, c, Color.Empty);
                 Ui.Text(g, label, face, dimmed ? Ui.Gray : Ui.Graphite, x + 15, y, lw + 4, h, Ui.Left);
                 Ui.Text(g, amount, Ui.Label, Ui.Gray, x + 16 + lw + 4, y, sw + 4, h, Ui.Left);
                 boxes.Add(i < names.Length ? new Rectangle(x - 4, y + 2, w - 6, h - 4) : Rectangle.Empty);
                 x += w;
             }
-        }
-
-        string Label(int i)
-        {
-            if (i < names.Length) return names[i];
-            return i == names.Length ? "everything else" : "striped: Windows system files";
         }
 
         int KeyAt(Point p)
@@ -3024,7 +2987,7 @@ namespace OOutSize
             leftover = null;
             tree.Slot = null;
             tree.SetRoot(null);
-            legend.Set(null, null, 0, 0);
+            legend.Set(null, null, 0);
             summary.Clear();
             crumb.Text = "";
             upBtn.Enabled = openBtn.Enabled = false;
@@ -3110,8 +3073,7 @@ namespace OOutSize
             // around, delete things or scan a folder again
             string[] all = types.Names();
             long[] sums = new long[all.Length];
-            long striped;
-            Scanner.Tally(root, sums, out striped);
+            Scanner.Tally(root, sums);
             typeSlot = new sbyte[all.Length];
             for (int i = 0; i < all.Length; i++) typeSlot[i] = -1;
             List<string> names = new List<string>();
@@ -3128,7 +3090,7 @@ namespace OOutSize
             }
             slotType = picked.ToArray();
             tree.Slot = typeSlot;
-            legend.Set(names.ToArray(), new long[names.Count], 0, 0);
+            legend.Set(names.ToArray(), new long[names.Count], 0);
             tree.SetRoot(root);
             map.ShowMap(root, typeSlot);
             SetView(root);
@@ -3156,12 +3118,11 @@ namespace OOutSize
                 map.SetSlots(typeSlot);
             }
             long[] sums = new long[all.Length];
-            long striped;
-            Scanner.Tally(root, sums, out striped);
+            Scanner.Tally(root, sums);
             long[] sizes = new long[slotType.Length];
             long coloured = 0;
             for (int i = 0; i < slotType.Length; i++) { sizes[i] = sums[slotType[i]]; coloured += sizes[i]; }
-            legend.Sizes(sizes, Math.Max(0, root.Size - coloured), striped);
+            legend.Sizes(sizes, Math.Max(0, root.Size - coloured));
 
             volKnown = VolumeSpace(s.RootPath, out volTotal, out volFree);
             long used = volTotal - volFree;
@@ -3274,7 +3235,7 @@ namespace OOutSize
             if (!opt.ReadOnly && n != root && n.Kind != Node.KPile)
             {
                 menu.Items.Add(new ToolStripSeparator());
-                if (Guard.Striped(n.Guard) || Guard.Keep(Tree.PathOf(n)).Length > 0)
+                if (Guard.HandsOff(n.Guard) || Guard.Keep(Tree.PathOf(n)).Length > 0)
                     menu.Items.Add("Why can this not be deleted?", null, delegate { Delete(n, false); });
                 else
                 {
@@ -3320,7 +3281,7 @@ namespace OOutSize
             string what = isDir ? "folder" : "file";
 
             // windows owns it, or the machine falls over without it. no way round this one
-            string no = Guard.Striped(n.Guard) && n.Guard < Guard.Advice.Length ? Guard.Advice[n.Guard] : Guard.Keep(path);
+            string no = Guard.HandsOff(n.Guard) && n.Guard < Guard.Advice.Length ? Guard.Advice[n.Guard] : Guard.Keep(path);
             if (no.Length > 0)
             {
                 MessageBox.Show(this, "OOutSize will not delete this " + what + ".\r\n\r\n" + path + "\r\n\r\n" + no,
@@ -3660,8 +3621,9 @@ namespace OOutSize
     public static class Program
     {
         // the script reads this. a powershell window that already compiled an older copy keeps that copy,
-        // and this is how the script can tell and say so
-        public const int Build = 3;
+        // and this is how the script can tell and say so. goes up every time the c# changes - the number in
+        // the script's ;ast few lines has to match
+        public const int Build = 5;
 
         // called from powershell. the window gets its own sta thread so it does not care how the host was started
         public static void Run(string path, string script, bool backupPrivilege, int maxFilesPerFolder, int threads,
@@ -3709,7 +3671,7 @@ namespace OOutSize
 $loaded = 'OOutSize.Program' -as [type]
 if ($loaded) {
     $build = $loaded.GetField('Build')
-    if (-not $build -or $build.GetValue($null) -ne 3) {
+    if (-not $build -or $build.GetValue($null) -ne 5) {
         throw 'A different version of OOutSize is already loaded in this PowerShell window. Open a new PowerShell window and run it again.'
     }
 }
