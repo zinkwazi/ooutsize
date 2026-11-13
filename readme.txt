@@ -43,7 +43,7 @@ OOutSize runs without admin rights, but then it can only see what your
 account can read. Folders it cannot get into are left out, so the totals
 come up short.
 
-When that is the case a yellow strip across the top of the window says so,
+When that is the case an orange strip across the top of the window says so,
 with a Restart as admin button. The PowerShell window prints the same warning.
 
 Being signed in as an administrator is not enough on its own. The PowerShell
@@ -61,8 +61,8 @@ Top row of tiles
   used that the scan could not see. This is usually shadow copies, folders
   it was not allowed into or file system overhead
 - could not be read: folders that were skipped. Click the tile for the list
-- free: free space on the volume. The tile is green, yellow under 20 percent
-  or red under 10 percent
+- free: free space on the volume. Under 20 percent the label turns red with
+  a down arrow and the word low. Under 10 percent it is bold as well
 
 Under the path it says how long the scan took and on how many threads.
 
@@ -95,8 +95,8 @@ Mouse and keys
   Move to Recycle Bin and Delete permanently
 - Del moves the selected row to the Recycle Bin. Shift+Del deletes it
   permanently. Both ask first
-- Click a file type under the map to keep its colour and fade out the rest.
-  Click it again to switch back
+- Point at a file type under the map to fade out the rest. Click it to keep
+  it that way and click again to switch back
 - F5 scans again
 - Esc stops a scan and shows what it has so far
 
@@ -277,7 +277,7 @@ The scan is slow
     what it has found so far. Esc stops it early
 
 The numbers look too small
-    Check for the yellow strip. Without admin rights, folders the account
+    Check for the orange strip. Without admin rights, folders the account
     cannot read are missing from the totals
 
 There is no delete on the right click menu

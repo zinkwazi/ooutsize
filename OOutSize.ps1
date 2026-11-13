@@ -15,7 +15,7 @@
     Start it with -ReadOnly to take the delete options away.
 
     It runs without admin rights, but then any folder the account cannot read is left out of the
-    totals. A yellow strip across the window and a console warning say so when that is the case.
+    totals. An orange strip across the window and a console warning say so when that is the case.
 
     How to read the numbers:
       - Sizes are what Explorer calls Size. Sparse, compressed and cloud placeholder files are the
@@ -30,7 +30,7 @@
       - Double click a block in the map to zoom in. Backspace or the Up button goes back out.
       - Right click anything for Open in Explorer, Copy path, Copy listing, Scan again,
         Move to Recycle Bin and Delete permanently. Del and Shift+Del do the last two from the tree.
-      - Click a file type under the map to keep its colour and fade out the rest.
+      - Point at a file type under the map to fade out the rest. Click it to keep it that way.
       - Striped blocks belong to Windows. Hover over one to see why it should not be deleted by hand.
       - A date in an orange tag means nothing in that folder has changed for over a year.
       - F5 scans again. Esc stops a scan and shows what it has so far.
@@ -1205,34 +1205,45 @@ namespace OOutSize
         }
     }
 
-    // colours, fonts and the couple of drawing helpers everything shares
+    // colours, fonts and the drawing helpers everything shares. all of it follows the gbl style guide
     internal static class Ui
     {
-        // the house report colours and nothing grey - a faded outside open orange frame, white sheet, and the tile colours
-        // (blue, yellow, teal, violet, orange) doing the rest
-        public static readonly Color Surface = Rgb(0xffffff), Plane = Rgb(0xfde8de), Ink = Rgb(0x16304f),
-            Ink2 = Rgb(0x3d5a80), Muted = Rgb(0x6f8fbf), Hair = Rgb(0xc7d8f3), Axis = Rgb(0x9db8e8),
-            Blue = Rgb(0x2f6fd6), Track = Rgb(0xe4ecf9), TrackOnPick = Rgb(0xb9cdf0),
-            Orange = Rgb(0xf16521), OrangeWash = Rgb(0xfceadb), OrangeInk = Rgb(0xb85a0e), Button = Rgb(0xfbd3a0),
-            Yellow = Rgb(0xd9a400), YellowWash = Rgb(0xfbf3d6), YellowInk = Rgb(0x6b4f00),
-            Teal = Rgb(0x2e7d6b), TealWash = Rgb(0xe3f0ec), Violet = Rgb(0x7b4fa6), VioletWash = Rgb(0xeee8f5),
-            Good = Rgb(0x22b14c), GoodWash = Rgb(0xe2f5e8),
-            Critical = Rgb(0xb5443a), CriticalTrack = Rgb(0xf4dfdc),
-            Other = Rgb(0xfbd3a0), Dim = Rgb(0xc7d8f3),
-            Pick = Rgb(0xd5e2f7), PickIdle = Rgb(0xfbf3d6), Hot = Rgb(0xeef3fb), White = Color.White,
-            Band = Rgb(0xe4ecf9), OnFrame = Rgb(0x3d5a80);
+        // the guide's named colours and nothing mixed by eye. neutrals first, then each hue as its colour,
+        // its light background and (where one gets used here) its dark step for text
+        public static readonly Color White = Rgb(0xFFFFFF), GrayLight = Rgb(0xE8ECF1), GrayLine = Rgb(0xDDE3EA),
+            GrayBorder = Rgb(0xC9D2DC), Gray = Rgb(0x5B6773), Graphite = Rgb(0x1F2730), Navy = Rgb(0x16304F),
+            Yellow = Rgb(0xF5C400), YellowLight = Rgb(0xFCF5CB),
+            Blue = Rgb(0x2F6FD6), BlueLight = Rgb(0xE4ECF9),
+            Green = Rgb(0x3B8132), GreenLight = Rgb(0xACD8A7),
+            Aqua = Rgb(0x17A9CB), AquaLight = Rgb(0xDFF0F6),
+            Orange = Rgb(0xEE7A1A), OrangeLight = Rgb(0xFCEADB), OrangeText = Rgb(0xAD4A00),
+            Purple = Rgb(0x7B4FA6), PurpleLight = Rgb(0xEEE8F5),
+            Red = Rgb(0xB5443A), RedLight = Rgb(0xFAE6E3), RedText = Rgb(0xA7372F),
+            Rose = Rgb(0xE573A3), RoseLight = Rgb(0xF7E6EC);
 
-        // file type colours, biggest type first - blue and yellow lead like the paired bars on the reports
-        public static readonly Color[] TypeFill = { Rgb(0x2f6fd6), Rgb(0xd9a400), Rgb(0x2e7d6b), Rgb(0x7b4fa6),
-            Rgb(0xf16521), Rgb(0x16304f), Rgb(0x44a466) };
+        // the guide dims a mark to 30 percent when another one is picked out. worked out against white once so a
+        // dimmed block is a plain fill. everything that is not one of the coloured file types is drawn that way for good
+        public static readonly Color Other = Faded(Orange);
+        public static readonly Color Pick = BlueLight, PickIdle = Mix(BlueLight, White, 0.45), Hot = Mix(BlueLight, White, 0.65);
 
-        // each top level folder in the map gets one of the tile colours - soft fill, strong top edge
-        public static readonly Color[] CardWash = { Rgb(0xe4ecf9), Rgb(0xfbf3d6), Rgb(0xe3f0ec), Rgb(0xeee8f5), Rgb(0xfceadb) };
-        public static readonly Color[] CardEdge = { Rgb(0x2f6fd6), Rgb(0xd9a400), Rgb(0x2e7d6b), Rgb(0x7b4fa6), Rgb(0xf16521) };
+        // chart colours in the guide's order of preference, biggest file type first. red sits out, it is for status only
+        public static readonly Color[] TypeFill = { Yellow, Blue, Green, Aqua, Orange, Purple, Rose };
+        public static readonly Color[] TypeDim = { Faded(Yellow), Faded(Blue), Faded(Green), Faded(Aqua), Faded(Orange),
+            Faded(Purple), Faded(Rose) };
 
-        public static readonly Font Base = Make("Segoe UI", 9f, FontStyle.Regular), Bold = Make("Segoe UI", 9f, FontStyle.Bold),
-            Small = Make("Segoe UI", 8.25f, FontStyle.Regular), Big = Make("Segoe UI", 13f, FontStyle.Regular),
-            Title = Make("Segoe UI", 10.5f, FontStyle.Bold), Number = Make("Segoe UI Light", 15f, FontStyle.Regular);
+        // tiles in that same order - light background, bar in its own colour. there is no red tile
+        public static readonly Color[] TileLight = { YellowLight, BlueLight, GreenLight, AquaLight, OrangeLight, PurpleLight, RoseLight };
+        public static readonly Color[] TileBar = { Yellow, Blue, Green, Aqua, Orange, Purple, Rose };
+
+        // top level folders in the map are tiles too. orange is left out of those, it is the accent and
+        // pale orange already means everything e;se
+        public static readonly Color[] CardWash = { YellowLight, BlueLight, GreenLight, AquaLight, PurpleLight, RoseLight };
+        public static readonly Color[] CardEdge = { Yellow, Blue, Green, Aqua, Purple, Rose };
+
+        // arial throughout, regular and bold only, at the guide's pixel sizes: body 13, label 11.5, caption 10, heading 15 bold.
+        // the tile numeral is smaller than the guide's 40 because these tiles are
+        public static readonly Font Base = Make(13f, false), Bold = Make(13f, true), Label = Make(11.5f, false),
+            LabelBold = Make(11.5f, true), Caption = Make(10f, false), Head = Make(15f, true), Numeral = Make(22f, false);
 
         public static readonly StringFormat Left = Format(StringAlignment.Near), Right = Format(StringAlignment.Far),
             Mid = Format(StringAlignment.Center), Wrap = new StringFormat();
@@ -1245,25 +1256,33 @@ namespace OOutSize
             HatchBrush b;
             int key = c.ToArgb();
             if (hatches.TryGetValue(key, out b)) return b;
-            // stripe is the fill pulled towards white, or towards navy when the fill is already pale
-            bool pale = 0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B > 155;
-            Color to = pale ? Ink : White;
-            double t = pale ? 0.30 : 0.45;
-            Color line = Color.FromArgb(255, (int)(c.R + (to.R - c.R) * t), (int)(c.G + (to.G - c.G) * t), (int)(c.B + (to.B - c.B) * t));
-            b = new HatchBrush(HatchStyle.WideUpwardDiagonal, line, c);
+            // stripe is the fill pulled towards white, or towards graphite when the fill is already pale
+            bool pale = InkOn(c) == Graphite;
+            b = new HatchBrush(HatchStyle.WideUpwardDiagonal, Mix(c, pale ? Graphite : White, pale ? 0.30 : 0.45), c);
             hatches[key] = b;
             return b;
         }
 
         static readonly Dictionary<int, SolidBrush> brushes = new Dictionary<int, SolidBrush>();
         static readonly Dictionary<int, Pen> pens = new Dictionary<int, Pen>();
+        static readonly Dictionary<int, Color> inks = new Dictionary<int, Color>();
 
         static Color Rgb(int v) { return Color.FromArgb(255, (v >> 16) & 255, (v >> 8) & 255, v & 255); }
 
-        static Font Make(string family, float size, FontStyle style)
+        // t is how far to go from a to b
+        public static Color Mix(Color a, Color b, double t)
         {
-            try { return new Font(family, size, style); }
-            catch { return new Font(FontFamily.GenericSansSerif, size, style); }
+            return Color.FromArgb(255, (int)Math.Round(a.R + (b.R - a.R) * t), (int)Math.Round(a.G + (b.G - a.G) * t),
+                (int)Math.Round(a.B + (b.B - a.B) * t));
+        }
+
+        public static Color Faded(Color c) { return Mix(c, White, 0.70); }
+
+        static Font Make(float pixels, bool bold)
+        {
+            FontStyle style = bold ? FontStyle.Bold : FontStyle.Regular;
+            try { return new Font("Arial", pixels, style, GraphicsUnit.Pixel); }
+            catch { return new Font(FontFamily.GenericSansSerif, pixels, style, GraphicsUnit.Pixel); }
         }
 
         static StringFormat Format(StringAlignment a)
@@ -1302,14 +1321,121 @@ namespace OOutSize
             return (int)Math.Ceiling(g.MeasureString(s, f).Width);
         }
 
-        // text that sits on a coloured block is white or near black, whichever the fill needs
-        public static Color InkOn(Color fill)
+        static double Channel(int v)
         {
-            double lum = 0.2126 * fill.R + 0.7152 * fill.G + 0.0722 * fill.B;
-            return lum > 155 ? Ink : White;
+            double s = v / 255.0;
+            return s <= 0.03928 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4);
         }
 
-        // a meter - square where it starts, round where it ends, on a paler track of the same colour
+        static double Luminance(Color c) { return 0.2126 * Channel(c.R) + 0.7152 * Channel(c.G) + 0.0722 * Channel(c.B); }
+
+        // text that sits on a coloured block is graphite or white, whichever of the two reads better against the fill
+        public static Color InkOn(Color fill)
+        {
+            Color ink;
+            int key = fill.ToArgb();
+            if (inks.TryGetValue(key, out ink)) return ink;
+            double l = Luminance(fill);
+            ink = (l + 0.05) / (Luminance(Graphite) + 0.05) >= 1.05 / (l + 0.05) ? Graphite : White;
+            inks[key] = ink;
+            return ink;
+        }
+
+        // 0 to 1 in, 0 to 1 out, quick off the mark and gentle at the end. close enough to the guide's curve
+        public static float Ease(float t)
+        {
+            float u = 1f - t;
+            return 1f - u * u * u;
+        }
+
+        // rounded outline with a radius per corner, clockwise from top left. 0 leaves that corner square
+        public static GraphicsPath Round(float x, float y, float w, float h, float tl, float tr, float br, float bl)
+        {
+            float most = Math.Min(w, h) / 2f;
+            tl = Math.Min(tl, most);
+            tr = Math.Min(tr, most);
+            br = Math.Min(br, most);
+            bl = Math.Min(bl, most);
+            GraphicsPath p = new GraphicsPath();
+            if (tl > 0) p.AddArc(x, y, tl * 2, tl * 2, 180, 90); else p.AddLine(x, y, x, y);
+            if (tr > 0) p.AddArc(x + w - tr * 2, y, tr * 2, tr * 2, 270, 90); else p.AddLine(x + w, y, x + w, y);
+            if (br > 0) p.AddArc(x + w - br * 2, y + h - br * 2, br * 2, br * 2, 0, 90); else p.AddLine(x + w, y + h, x + w, y + h);
+            if (bl > 0) p.AddArc(x, y + h - bl * 2, bl * 2, bl * 2, 90, 90); else p.AddLine(x, y + h, x, y + h);
+            p.CloseFigure();
+            return p;
+        }
+
+        // rounded box. an edge is the box filled twice, once in the edge colour and once a pixel in,
+        // which stays crisp where a pen would smear. pass Color.Empty for no edge
+        public static void Box(Graphics g, float x, float y, float w, float h, float r, Color fill, Color edge)
+        {
+            if (w < 1 || h < 1) return;
+            SmoothingMode sm = g.SmoothingMode;
+            PixelOffsetMode pm = g.PixelOffsetMode;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.Half;
+            using (GraphicsPath outer = Round(x, y, w, h, r, r, r, r)) g.FillPath(B(edge.IsEmpty ? fill : edge), outer);
+            if (!edge.IsEmpty && w > 2 && h > 2)
+            {
+                float q = Math.Max(0f, r - 1f);
+                using (GraphicsPath inner = Round(x + 1, y + 1, w - 2, h - 2, q, q, q, q)) g.FillPath(B(fill), inner);
+            }
+            g.SmoothingMode = sm;
+            g.PixelOffsetMode = pm;
+        }
+
+        // the guide's tile - light background, 3px bar across the top in the tile's own colour, 6px corners
+        public static void Tile(Graphics g, float x, float y, float w, float h, Color light, Color bar)
+        {
+            Box(g, x, y, w, h, 6f, light, Color.Empty);
+            TopBar(g, x, y, w, Math.Min(6f, Math.Min(w, h) / 2f), bar);
+        }
+
+        // the guide's card - white, gray-line edge, 3px orange bar on top, 6px corners. the shadow is up to the caller
+        public static void Card(Graphics g, float x, float y, float w, float h)
+        {
+            Box(g, x, y, w, h, 6f, White, GrayLine);
+            TopBar(g, x, y, w, Math.Min(6f, Math.Min(w, h) / 2f), Orange);
+        }
+
+        // the 3px bar. it follows the rounded top corners the way a css border on a rounded box does
+        static void TopBar(Graphics g, float x, float y, float w, float r, Color bar)
+        {
+            if (r <= 3f) { g.FillRectangle(B(bar), x, y, w, 3f); return; }
+            SmoothingMode sm = g.SmoothingMode;
+            PixelOffsetMode pm = g.PixelOffsetMode;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.Half;
+            // where the corner's curve is 3px down from the top, as an angle on its circle
+            float a = 180f + (float)(Math.Asin((r - 3f) / r) * 180.0 / Math.PI);
+            using (GraphicsPath top = new GraphicsPath())
+            {
+                top.AddArc(x, y, r * 2, r * 2, a, 270f - a);
+                top.AddArc(x + w - r * 2, y, r * 2, r * 2, 270f, 270f - a);
+                top.CloseFigure();
+                g.FillPath(B(bar), top);
+            }
+            g.SmoothingMode = sm;
+            g.PixelOffsetMode = pm;
+        }
+
+        // soft shadow for something lifted off the page. gdi has no blur, so it is rings of graphite, each a
+        // pixel wider than the last and all of them faint. alpha is about what the middle adds up to, out of 255
+        public static void Shadow(Graphics g, float x, float y, float w, float h, float r, float drop, int spread, int alpha)
+        {
+            if (alpha <= 0 || spread <= 0) return;
+            Brush ring = B(Color.FromArgb(Math.Max(1, alpha / spread), Graphite));
+            SmoothingMode sm = g.SmoothingMode;
+            PixelOffsetMode pm = g.PixelOffsetMode;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.Half;
+            for (int i = spread; i >= 1; i--)
+                using (GraphicsPath p = Round(x - i, y + drop - i, w + 2 * i, h + 2 * i, r + i, r + i, r + i, r + i)) g.FillPath(ring, p);
+            g.SmoothingMode = sm;
+            g.PixelOffsetMode = pm;
+        }
+
+        // a meter - square where it starts, round where it ends, on the light background of its own colour
         public static void Bar(Graphics g, int x, int y, int w, int h, double share, Color fill, Color track)
         {
             Pill(g, B(track), x, y, w, h);
@@ -1356,7 +1482,7 @@ namespace OOutSize
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
                 | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
             TabStop = true;
-            BackColor = Ui.Surface;
+            BackColor = Ui.White;
             bar.Visible = false;
             bar.ValueChanged += delegate { if (!quiet) { top = bar.Value; Invalidate(); } };
             Controls.Add(bar);
@@ -1497,18 +1623,19 @@ namespace OOutSize
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            g.Clear(Ui.Surface);
+            g.Clear(Ui.White);
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
             int w, xSize, xPct, xBar, xFiles, xDate;
             Columns(out w, out xSize, out xPct, out xBar, out xFiles, out xDate);
 
-            g.DrawLine(Ui.P(Ui.Ink), 0, HeadH - 1, ClientSize.Width, HeadH - 1);
+            // text is graphite, the quieter columns and the headings are the guide's grey, lines are its hairline
+            g.DrawLine(Ui.P(Ui.GrayBorder), 0, HeadH - 1, ClientSize.Width, HeadH - 1);
             long stale = DateTime.UtcNow.AddDays(-365).ToFileTimeUtc();
-            Ui.Text(g, "Name", Ui.Small, Ui.Ink2, 10, 0, xSize - 16, HeadH, Ui.Left);
-            Ui.Text(g, "Size", Ui.Small, Ui.Ink2, xSize, 0, 70, HeadH, Ui.Right);
-            Ui.Text(g, "Share of parent", Ui.Small, Ui.Ink2, xPct, 0, xBar + 80 - xPct, HeadH, Ui.Right);
-            if (xFiles >= 0) Ui.Text(g, "Files", Ui.Small, Ui.Ink2, xFiles, 0, 62, HeadH, Ui.Right);
-            if (xDate >= 0) Ui.Text(g, "Newest", Ui.Small, Ui.Ink2, xDate, 0, 78, HeadH, Ui.Right);
+            Ui.Text(g, "Name", Ui.Label, Ui.Gray, 10, 0, xSize - 16, HeadH, Ui.Left);
+            Ui.Text(g, "Size", Ui.Label, Ui.Gray, xSize, 0, 70, HeadH, Ui.Right);
+            Ui.Text(g, "Share of parent", Ui.Label, Ui.Gray, xPct, 0, xBar + 80 - xPct, HeadH, Ui.Right);
+            if (xFiles >= 0) Ui.Text(g, "Files", Ui.Label, Ui.Gray, xFiles, 0, 62, HeadH, Ui.Right);
+            if (xDate >= 0) Ui.Text(g, "Newest", Ui.Label, Ui.Gray, xDate, 0, 78, HeadH, Ui.Right);
 
             for (int i = 0; ; i++)
             {
@@ -1526,22 +1653,23 @@ namespace OOutSize
                 Glyph(g, n, x, y + 5);
                 x += 18;
                 string name = n.Denied ? n.Name + "   (could not be read)" : n.Name;
-                Ui.Text(g, name, Ui.Base, n.Kind == Node.KPile ? Ui.Ink2 : Ui.Ink, x, y, xSize - 6 - x, RowH, Ui.Left);
-                Ui.Text(g, Fmt.Size(n.Size), Ui.Base, Ui.Ink, xSize, y, 70, RowH, Ui.Right);
+                Ui.Text(g, name, Ui.Base, n.Kind == Node.KPile ? Ui.Gray : Ui.Graphite, x, y, xSize - 6 - x, RowH, Ui.Left);
+                Ui.Text(g, Fmt.Size(n.Size), Ui.Base, Ui.Graphite, xSize, y, 70, RowH, Ui.Right);
                 double share = Share(n);
-                Ui.Text(g, Fmt.Pct(share), Ui.Base, Ui.Ink2, xPct, y, 46, RowH, Ui.Right);
-                Ui.Bar(g, xBar + 8, y + 7, 72, 8, share, Ui.Blue, picked && Focused ? Ui.TrackOnPick : Ui.Track);
-                if (xFiles >= 0 && n.Kind != Node.KFile) Ui.Text(g, Fmt.Count(n.Files), Ui.Base, Ui.Ink2, xFiles, y, 62, RowH, Ui.Right);
+                Ui.Text(g, Fmt.Pct(share), Ui.Base, Ui.Gray, xPct, y, 46, RowH, Ui.Right);
+                // one series of bars, so it takes the first colour in the guide's order on that colour's own light background
+                Ui.Bar(g, xBar + 8, y + 7, 72, 8, share, Ui.Yellow, Ui.YellowLight);
+                if (xFiles >= 0 && n.Kind != Node.KFile) Ui.Text(g, Fmt.Count(n.Files), Ui.Base, Ui.Gray, xFiles, y, 62, RowH, Ui.Right);
                 if (xDate >= 0 && n.Stamp > 0 && n.Stamp < stale)
                 {
-                    // nothing in here has changed for over a year - same orange tag the reports use for old things
+                    // nothing in here has changed for over a year. orange is for what wants a look, so it gets the orange tag
                     string when = Fmt.Date(n.Stamp);
-                    int tw = Ui.Width(g, when, Ui.Small) + 6;
-                    g.FillRectangle(Ui.B(Ui.OrangeWash), xDate + 78 - tw, y + 3, tw, RowH - 7);
-                    Ui.Text(g, when, Ui.Small, Ui.OrangeInk, xDate + 78 - tw, y + 3, tw, RowH - 7, Ui.Mid);
+                    int tw = Ui.Width(g, when, Ui.Label) + 8;
+                    Ui.Box(g, xDate + 78 - tw, y + 3, tw, RowH - 7, 3, Ui.OrangeLight, Color.Empty);
+                    Ui.Text(g, when, Ui.Label, Ui.OrangeText, xDate + 78 - tw, y + 3, tw, RowH - 7, Ui.Mid);
                 }
-                else if (xDate >= 0) Ui.Text(g, Fmt.Date(n.Stamp), Ui.Base, Ui.Ink2, xDate, y, 78, RowH, Ui.Right);
-                g.DrawLine(Ui.P(Ui.Hair), 0, y + RowH - 1, w, y + RowH - 1);
+                else if (xDate >= 0) Ui.Text(g, Fmt.Date(n.Stamp), Ui.Base, Ui.Gray, xDate, y, 78, RowH, Ui.Right);
+                g.DrawLine(Ui.P(Ui.GrayLine), 0, y + RowH - 1, w, y + RowH - 1);
             }
         }
 
@@ -1552,7 +1680,7 @@ namespace OOutSize
             Point[] pts = open
                 ? new Point[] { new Point(x + 1, y + 9), new Point(x + 11, y + 9), new Point(x + 6, y + 15) }
                 : new Point[] { new Point(x + 3, y + 6), new Point(x + 9, y + 11), new Point(x + 3, y + 16) };
-            g.FillPolygon(Ui.B(Ui.Ink2), pts);
+            g.FillPolygon(Ui.B(Ui.Gray), pts);
             g.SmoothingMode = sm;
         }
 
@@ -1560,7 +1688,7 @@ namespace OOutSize
         {
             if (n.Kind == Node.KDir)
             {
-                // little folder shape in folder yellow. striped when windows owns it, orange when it could not be read
+                // little folder shape in yellow. striped when windows owns it, orange when it could not be read
                 Brush b = n.Denied ? Ui.B(Ui.Orange) : (Guard.Striped(n.Guard) ? (Brush)Ui.Hatch(Ui.Yellow) : Ui.B(Ui.Yellow));
                 g.FillRectangle(b, x, y + 1, 6, 3);
                 g.FillRectangle(b, x, y + 3, 13, 8);
@@ -1569,7 +1697,7 @@ namespace OOutSize
             Color c = Ui.Other;
             if (Slot != null && n.Type >= 0 && n.Type < Slot.Length && Slot[n.Type] >= 0)
                 c = Ui.TypeFill[Slot[n.Type]];
-            if (n.Kind == Node.KPile) g.FillRectangle(Ui.B(Ui.Axis), x + 4, y, 9, 9);
+            if (n.Kind == Node.KPile) g.FillRectangle(Ui.B(Ui.GrayBorder), x + 4, y, 9, 9);
             if (Guard.Striped(n.Guard)) g.FillRectangle(Ui.Hatch(c), x + 1, y + 2, 9, 9);
             else g.FillRectangle(Ui.B(c), x + 1, y + 2, 9, 9);
         }
@@ -1705,8 +1833,12 @@ namespace OOutSize
         readonly List<Hit> hits = new List<Hit>();
         sbyte[] slot;
         int emph = -1;
+        int preview = -1;       // a type the mouse is on in the key. it wins over emph while it lasts
         readonly List<DriveRow> drives = new List<DriveRow>();
         int hotDrive = -1;
+        float[] rise = new float[0];        // how far each drive card has come up, 0 to 1
+        readonly System.Windows.Forms.Timer anim = new System.Windows.Forms.Timer();
+        static readonly Pen Dash = MakeDash();
 
         public string BusyTitle = "", BusyLine1 = "", BusyLine2 = "";
         public double BusyShare = -1;
@@ -1721,7 +1853,31 @@ namespace OOutSize
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
                 | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
-            BackColor = Ui.Surface;
+            BackColor = Ui.White;
+            anim.Interval = 15;
+            anim.Tick += delegate { Settle(); };
+        }
+
+        static Pen MakeDash()
+        {
+            Pen p = new Pen(Ui.Navy, 1f);
+            p.DashPattern = new float[] { 3f, 3f };
+            return p;
+        }
+
+        // drive cards come up under the mouse and go back down when it leaves, over 0.18s like the guide asks
+        void Settle()
+        {
+            bool moving = false;
+            for (int i = 0; i < rise.Length; i++)
+            {
+                float want = mode == Idle && i == hotDrive ? 1f : 0f;
+                if (rise[i] == want) continue;
+                rise[i] = rise[i] < want ? Math.Min(want, rise[i] + 15f / 180f) : Math.Max(want, rise[i] - 15f / 180f);
+                moving = true;
+            }
+            if (!moving) anim.Stop();
+            Invalidate();
         }
 
         public void ShowIdle()
@@ -1749,6 +1905,8 @@ namespace OOutSize
                 }
             }
             catch { }
+            rise = new float[drives.Count];
+            hotDrive = -1;
             Invalidate();
         }
 
@@ -1765,6 +1923,7 @@ namespace OOutSize
             mode = Map;
             slot = typeSlot;
             emph = -1;
+            preview = -1;
             view = root;
             pick = hover = null;
             hits.Clear();
@@ -1801,6 +1960,17 @@ namespace OOutSize
             Invalidate();
         }
 
+        public void SetPreview(int s)
+        {
+            if (s == preview) return;
+            preview = s;
+            stale = true;
+            Invalidate();
+        }
+
+        // the type that is picked out right now, -1 for none
+        int Shown { get { return preview >= 0 ? preview : emph; } }
+
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
@@ -1812,6 +1982,7 @@ namespace OOutSize
         protected override void Dispose(bool disposing)
         {
             if (disposing && bmp != null) { bmp.Dispose(); bmp = null; }
+            if (disposing) anim.Dispose();
             base.Dispose(disposing);
         }
 
@@ -1824,20 +1995,28 @@ namespace OOutSize
             if (mode == Idle) { PaintDrives(g); return; }
             if (mode == Busy) { PaintBusy(g); return; }
             if (stale || bmp == null || bmp.Width != ClientSize.Width || bmp.Height != ClientSize.Height) Render(g.DpiX, g.DpiY);
-            if (bmp == null) { g.Clear(Ui.Surface); return; }
+            if (bmp == null) { g.Clear(Ui.White); return; }
             g.DrawImageUnscaled(bmp, 0, 0);
 
             Rectangle r;
-            if (pick != null && FindBox(pick, out r)) Frame(g, r, 2);
-            if (hover != null && hover != pick && FindBox(hover, out r)) Frame(g, r, 1);
+            if (pick != null && FindBox(pick, out r)) Frame(g, r, true);
+            if (hover != null && hover != pick && FindBox(hover, out r)) Frame(g, r, false);
             if (hover != null) Tip(g);
         }
 
-        static void Frame(Graphics g, Rectangle r, int weight)
+        // navy is the guide's colour for a hover cursor and nothing else, a thin dashed line. what is picked gets
+        // the same line solid and doubled. white rides along so either one shows on a dark block too
+        static void Frame(Graphics g, Rectangle r, bool picked)
         {
-            for (int i = 0; i < weight; i++)
-                g.DrawRectangle(Ui.P(Ui.Ink), r.X + i, r.Y + i, r.Width - 1 - 2 * i, r.Height - 1 - 2 * i);
-            g.DrawRectangle(Ui.P(Ui.White), r.X + weight, r.Y + weight, r.Width - 1 - 2 * weight, r.Height - 1 - 2 * weight);
+            if (picked)
+            {
+                g.DrawRectangle(Ui.P(Ui.Navy), r.X, r.Y, r.Width - 1, r.Height - 1);
+                g.DrawRectangle(Ui.P(Ui.Navy), r.X + 1, r.Y + 1, r.Width - 3, r.Height - 3);
+                g.DrawRectangle(Ui.P(Ui.White), r.X + 2, r.Y + 2, r.Width - 5, r.Height - 5);
+                return;
+            }
+            g.DrawRectangle(Ui.P(Ui.White), r.X, r.Y, r.Width - 1, r.Height - 1);
+            g.DrawRectangle(Dash, r.X, r.Y, r.Width - 1, r.Height - 1);
         }
 
         // the thing itself may be too small to have a box of its own, so walk up til something does
@@ -1864,37 +2043,43 @@ namespace OOutSize
             return false;
         }
 
+        // the guide's tooltip - white, gray-border edge, 4px corners and a small shadow. name in bold on top,
+        // then a swatch with the size in bold, then the smaller grey note
         void Tip(Graphics g)
         {
             Node n = hover;
-            string head = Fmt.Size(n.Size);
-            if (view != null && view.Size > 0) head += "   " + Fmt.Pct((double)n.Size / view.Size) + " of this view";
-            string name = n.Name;
+            string size = Fmt.Size(n.Size);
+            string share = view != null && view.Size > 0 ? Fmt.Pct((double)n.Size / view.Size) + " of this view" : "";
             string more = n.Kind == Node.KDir ? Fmt.Things(n.Files, "file", "files") : "";
             if (n.Kind == Node.KDir && n.Dirs > 0) more += ", " + Fmt.Things(n.Dirs, "folder", "folders");
             string when = Fmt.Date(n.Stamp);
             if (when.Length > 0) more += (more.Length > 0 ? ", " : "") + (n.Kind == Node.KFile ? "changed " : "newest ") + when;
 
-            int w = Math.Max(Ui.Width(g, head, Ui.Bold), Math.Max(Ui.Width(g, name, Ui.Base), Ui.Width(g, more, Ui.Small)));
+            int sizeW = Ui.Width(g, size, Ui.LabelBold);
+            int w = Math.Max(Ui.Width(g, n.Name, Ui.LabelBold), Math.Max(22 + sizeW + Ui.Width(g, share, Ui.Label), Ui.Width(g, more, Ui.Caption)));
             string advice = Guard.Advice[n.Guard < Guard.Advice.Length ? n.Guard : 0];
             if (advice.Length > 0) w = Math.Max(w, 300);
             w = Math.Min(w, 460) + 20;
-            int h = more.Length > 0 ? 62 : 46;
-            int adviceH = advice.Length > 0 ? (int)Math.Ceiling(g.MeasureString(advice, Ui.Small, w - 28, Ui.Wrap).Height) + 6 : 0;
+            int h = more.Length > 0 ? 60 : 45;
+            int adviceH = advice.Length > 0 ? (int)Math.Ceiling(g.MeasureString(advice, Ui.Label, w - 28, Ui.Wrap).Height) + 6 : 0;
             int adviceY = h - 2;
             if (adviceH > 0) h += adviceH + 6;
             int x = mouse.X + 16, y = mouse.Y + 18;
-            if (x + w > ClientSize.Width - 4) x = Math.Max(4, mouse.X - w - 10);
-            if (y + h > ClientSize.Height - 4) y = Math.Max(4, mouse.Y - h - 10);
-            g.FillRectangle(Ui.B(Ui.White), x, y, w, h);
-            g.DrawRectangle(Ui.P(Ui.Axis), x, y, w - 1, h - 1);
-            Ui.Text(g, head, Ui.Bold, Ui.Ink, x + 9, y + 5, w - 16, 18, Ui.Left);
-            Ui.Text(g, name, Ui.Base, Ui.Ink2, x + 9, y + 23, w - 16, 18, Ui.Left);
-            if (more.Length > 0) Ui.Text(g, more, Ui.Small, Ui.Muted, x + 9, y + 40, w - 16, 16, Ui.Left);
+            if (x + w > ClientSize.Width - 6) x = Math.Max(4, mouse.X - w - 10);
+            if (y + h > ClientSize.Height - 8) y = Math.Max(4, mouse.Y - h - 10);
+            Ui.Shadow(g, x, y, w, h, 4, 2, 4, 38);
+            Ui.Box(g, x, y, w, h, 4, Ui.White, Ui.GrayBorder);
+            Ui.Text(g, n.Name, Ui.LabelBold, Ui.Graphite, x + 9, y + 6, w - 16, 16, Ui.Left);
+            bool faded;
+            Ui.Box(g, x + 10, y + 27, 9, 9, 1, Fill(n, out faded), Color.Empty);
+            Ui.Text(g, size, Ui.LabelBold, Ui.Graphite, x + 24, y + 23, sizeW + 4, 16, Ui.Left);
+            Ui.Text(g, share, Ui.Label, Ui.Gray, x + 30 + sizeW, y + 23, w - 38 - sizeW, 16, Ui.Left);
+            if (more.Length > 0) Ui.Text(g, more, Ui.Caption, Ui.Gray, x + 9, y + 41, w - 16, 14, Ui.Left);
             if (adviceH > 0)
             {
+                // the orange bar marks what needs attention
                 g.FillRectangle(Ui.B(Ui.Orange), x + 9, y + adviceY + 3, 3, adviceH - 6);
-                g.DrawString(advice, Ui.Small, Ui.B(Ui.Ink), new RectangleF(x + 17, y + adviceY, w - 28, adviceH + 2), Ui.Wrap);
+                g.DrawString(advice, Ui.Label, Ui.B(Ui.Graphite), new RectangleF(x + 17, y + adviceY, w - 28, adviceH + 2), Ui.Wrap);
             }
         }
 
@@ -1911,12 +2096,12 @@ namespace OOutSize
             hits.Clear();
             using (Graphics g = Graphics.FromImage(bmp))
             {
-                g.Clear(Ui.Surface);
+                g.Clear(Ui.White);
                 g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
                 if (view != null && view.Size > 0 && view.Kids != null && view.Kids.Length > 0)
                     Lay(g, view, 3, 3, W - 6, H - 6, 0, 0);
                 else
-                    Ui.Text(g, view == null ? "" : "Nothing in here takes up any space", Ui.Base, Ui.Ink2, 0, 0, W, H, Ui.Mid);
+                    Ui.Text(g, view == null ? "" : "Nothing in here takes up any space", Ui.Base, Ui.Gray, 0, 0, W, H, Ui.Mid);
             }
             stale = false;
         }
@@ -1979,15 +2164,16 @@ namespace OOutSize
             bool folder = Tree.HasKids(n) && n.Size > 0;
             if (!folder || bw < 12 || bh < 12)
             {
-                Color fill = Fill(n);
-                if (Guard.Striped(n.Guard) && emph < 0) g.FillRectangle(Ui.Hatch(fill), bx, by, bw, bh);
+                bool faded;
+                Color fill = Fill(n, out faded);
+                if (Guard.Striped(n.Guard) && Shown < 0) g.FillRectangle(Ui.Hatch(fill), bx, by, bw, bh);
                 else g.FillRectangle(Ui.B(fill), bx, by, bw, bh);
                 Note(n, bx, by, bw, bh);
-                if (bw >= 46 && bh >= 18 && (emph < 0 || fill != Ui.Dim))
+                if (bw >= 46 && bh >= 18 && !faded)
                 {
                     Color ink = Ui.InkOn(fill);
-                    Ui.Text(g, n.Name, Ui.Small, ink, bx + 4, by + 1, bw - 7, 16, Ui.Left);
-                    if (bh >= 34) Ui.Text(g, Fmt.Size(n.Size), Ui.Small, ink, bx + 4, by + 15, bw - 7, 16, Ui.Left);
+                    Ui.Text(g, n.Name, Ui.Label, ink, bx + 4, by + 1, bw - 7, 16, Ui.Left);
+                    if (bh >= 34) Ui.Text(g, Fmt.Size(n.Size), Ui.Label, ink, bx + 4, by + 15, bw - 7, 16, Ui.Left);
                 }
                 return;
             }
@@ -2001,23 +2187,28 @@ namespace OOutSize
                 return;
             }
 
-            // a folder is a card with its kids laid out inside. it wears the soft colour of its top level folder,
-            // and every other level down goes white so the nesting shows
-            g.FillRectangle(Ui.B((depth & 1) == 1 ? Ui.CardWash[hue] : Ui.White), bx, by, bw, bh);
+            // a folder is one of the guide's tiles with its kids laid out inside: the light background of its top level
+            // folder's colour, and at the top level the 3px bar and the round corners as well. every other level down
+            // goes white so the nesting shows
+            bool tinted = (depth & 1) == 1;
+            Color ground = tinted ? Ui.CardWash[hue] : Ui.White;
+            int edge = depth == 1 && roomForHead ? 3 : 0;
+            if (edge > 0) Ui.Tile(g, bx, by, bw, bh, ground, Ui.CardEdge[hue]);
+            else g.FillRectangle(Ui.B(ground), bx, by, bw, bh);
             Note(n, bx, by, bw, bh);
             int head = 0, pad = 1;
             if (roomForHead)
             {
-                int edge = depth == 1 ? 3 : 0;
-                if (edge > 0) g.FillRectangle(Ui.B(Ui.CardEdge[hue]), bx, by, bw, edge);
                 head = 18 + edge;
                 pad = 3;
+                // green-light is the one light background too dark for the grey, so the size goes graphite there
+                Color soft = tinted && ground == Ui.GreenLight ? Ui.Graphite : Ui.Gray;
                 if (bw >= 150)
                 {
-                    Ui.Text(g, Fmt.Size(n.Size), Ui.Small, Ui.Ink2, bx + bw - 78, by + edge, 74, 18, Ui.Right);
-                    Ui.Text(g, n.Name, Ui.Small, Ui.Ink, bx + 5, by + edge, bw - 88, 18, Ui.Left);
+                    Ui.Text(g, Fmt.Size(n.Size), Ui.Label, soft, bx + bw - 80, by + edge, 74, 18, Ui.Right);
+                    Ui.Text(g, n.Name, Ui.Label, Ui.Graphite, bx + 6, by + edge, bw - 92, 18, Ui.Left);
                 }
-                else Ui.Text(g, n.Name, Ui.Small, Ui.Ink, bx + 5, by + edge, bw - 9, 18, Ui.Left);
+                else Ui.Text(g, n.Name, Ui.Label, Ui.Graphite, bx + 6, by + edge, bw - 11, 18, Ui.Left);
             }
             else if (bw >= 24 && bh >= 24) pad = 2;
             int topPad = head > 0 ? head : pad;
@@ -2035,66 +2226,66 @@ namespace OOutSize
             hits.Add(hit);
         }
 
-        Color Fill(Node n)
+        Color Fill(Node n, out bool faded)
         {
             // a folder too small to open up takes the colour of the biggest file inside it
             Node c = n;
             while (c.Kind == Node.KDir && c.Kids != null && c.Kids.Length > 0) c = c.Kids[0];
             int s = -1;
             if (c.Kind != Node.KDir && slot != null && c.Type >= 0 && c.Type < slot.Length) s = slot[c.Type];
-            if (emph >= 0) return s == emph ? Ui.TypeFill[s] : Ui.Dim;
-            return s >= 0 ? Ui.TypeFill[s] : Ui.Other;
+            // the guide's way of picking one out: it stays at full strength and the others dim.
+            // everything e;se is drawn at that strength all the time, so it just stays as it is
+            int on = Shown;
+            faded = on >= 0 && s != on;
+            if (s < 0) return Ui.Other;
+            return faded ? Ui.TypeDim[s] : Ui.TypeFill[s];
         }
 
         void PaintBusy(Graphics g)
         {
-            g.Clear(Ui.Surface);
+            g.Clear(Ui.White);
             int W = ClientSize.Width, H = ClientSize.Height;
             int bw = Math.Max(120, Math.Min(480, W - 80));
             int x = (W - bw) / 2, y = Math.Max(20, H / 2 - 70);
-            Ui.Text(g, BusyTitle, Ui.Big, Ui.Ink, 20, y, W - 40, 28, Ui.Mid);
-            if (BusyShare >= 0) Ui.Bar(g, x, y + 42, bw, 8, BusyShare, Ui.Blue, Ui.Track);
-            Ui.Text(g, BusyLine1, Ui.Base, Ui.Ink, 20, y + 60, W - 40, 20, Ui.Mid);
-            Ui.Text(g, BusyLine2, Ui.Small, Ui.Muted, 20, y + 82, W - 40, 18, Ui.Mid);
-            Ui.Text(g, "Esc or the Stop button ends the scan early and shows what it has so far", Ui.Small, Ui.Muted, 20, y + 112, W - 40, 18, Ui.Mid);
+            Ui.Text(g, BusyTitle, Ui.Head, Ui.Graphite, 20, y, W - 40, 28, Ui.Mid);
+            if (BusyShare >= 0) Ui.Bar(g, x, y + 42, bw, 8, BusyShare, Ui.Yellow, Ui.YellowLight);
+            Ui.Text(g, BusyLine1, Ui.Base, Ui.Graphite, 20, y + 60, W - 40, 20, Ui.Mid);
+            Ui.Text(g, BusyLine2, Ui.Label, Ui.Gray, 20, y + 82, W - 40, 18, Ui.Mid);
+            Ui.Text(g, "Esc or the Stop button ends the scan early and shows what it has so far", Ui.Label, Ui.Gray, 20, y + 112, W - 40, 18, Ui.Mid);
         }
 
+        // each drive is one of the guide's cards: white, hairline edge, orange bar on top, a faint shadow at rest.
+        // it can be clicked, so it comes up 2px and the shadow deepens while the mouse is on it
         void PaintDrives(Graphics g)
         {
-            g.Clear(Ui.Surface);
+            g.Clear(Ui.White);
             int W = ClientSize.Width;
-            Ui.Text(g, "Pick a drive to scan", Ui.Big, Ui.Ink, 24, 18, W - 48, 28, Ui.Left);
-            Ui.Text(g, "Or type a folder path at the top and press Scan", Ui.Base, Ui.Ink2, 24, 46, W - 48, 20, Ui.Left);
-            int y = 84;
-            int rowW = Math.Max(200, Math.Min(640, W - 32));
+            Ui.Text(g, "Pick a drive to scan", Ui.Head, Ui.Graphite, 24, 16, W - 48, 24, Ui.Left);
+            Ui.Text(g, "Or type a folder path at the top and press Scan", Ui.Label, Ui.Gray, 24, 40, W - 48, 18, Ui.Left);
+            int y = 74;
+            int rowW = Math.Max(200, Math.Min(640, W - 48));
             for (int i = 0; i < drives.Count; i++)
             {
                 DriveRow d = drives[i];
-                d.Box = new Rectangle(16, y, rowW, 58);
-                if (i == hotDrive) g.FillRectangle(Ui.B(Ui.Hot), d.Box);
+                d.Box = new Rectangle(24, y, rowW, 70);
+                float t = i < rise.Length ? Ui.Ease(rise[i]) : 0f;
+                float cy = y - 2f * t;
+                Ui.Shadow(g, 24, cy, rowW, 70, 6, 1 + 5 * t, 2 + (int)Math.Round(8 * t), 14 + (int)(42 * t));
+                Ui.Card(g, 24, cy, rowW, 70);
                 double used = d.Total > 0 ? 1.0 - (double)d.Free / d.Total : 0;
-                bool low = d.Total > 0 && (double)d.Free / d.Total < 0.10;
+                // same two steps as the free tile up top: the words turn red under 20 percent free, the bar as well under 10
+                bool low = d.Total > 0 && (double)d.Free / d.Total < 0.20;
+                bool tight = d.Total > 0 && (double)d.Free / d.Total < 0.10;
                 string name = string.IsNullOrEmpty(d.Label) || d.Label == d.Root ? d.Root : d.Root + "   " + d.Label;
-                Ui.Text(g, name, Ui.Bold, Ui.Ink, 24, y + 4, rowW - 16, 20, Ui.Left);
-                Ui.Bar(g, 24, y + 28, rowW - 16, 8, used, low ? Ui.Critical : Ui.Blue, low ? Ui.CriticalTrack : Ui.Track);
+                Ui.Text(g, name, Ui.Head, Ui.Graphite, 38, cy + 10, rowW - 28, 22, Ui.Left);
+                Ui.Bar(g, 38, (int)Math.Round(cy) + 37, rowW - 28, 8, used, tight ? Ui.Red : Ui.Yellow, tight ? Ui.RedLight : Ui.YellowLight);
                 string line = Fmt.Size(d.Free) + " free of " + Fmt.Size(d.Total);
-                int lx = 24;
-                if (low) { Warn(g, 24, y + 41); lx = 42; line = "Low on space   " + line; }
-                Ui.Text(g, line, Ui.Small, Ui.Ink2, lx, y + 38, rowW - 16 - (lx - 24), 18, Ui.Left);
-                y += 64;
+                // bad is red and always comes with a mark in front, so it never rests on the colour alone
+                if (low) line = "\u25BC Low on space   " + line;
+                Ui.Text(g, line, Ui.Label, low ? Ui.RedText : Ui.Gray, 38, cy + 48, rowW - 28, 16, Ui.Left);
+                y += 84;
             }
-            if (drives.Count == 0) Ui.Text(g, "No fixed drives found", Ui.Base, Ui.Muted, 24, y, W - 48, 20, Ui.Left);
-        }
-
-        // status colour never travels alone, it always gets this mark and a label next to it
-        public static void Warn(Graphics g, int x, int y)
-        {
-            SmoothingMode sm = g.SmoothingMode;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.FillEllipse(Ui.B(Ui.Critical), x, y, 12, 12);
-            g.SmoothingMode = sm;
-            g.FillRectangle(Ui.B(Ui.White), x + 5, y + 2, 2, 5);
-            g.FillRectangle(Ui.B(Ui.White), x + 5, y + 8, 2, 2);
+            if (drives.Count == 0) Ui.Text(g, "No fixed drives found", Ui.Base, Ui.Gray, 24, y, W - 48, 20, Ui.Left);
         }
 
         // ---------- mouse
@@ -2127,7 +2318,7 @@ namespace OOutSize
             if (mode == Idle)
             {
                 int d = DriveAt(e.Location);
-                if (d != hotDrive) { hotDrive = d; Cursor = d >= 0 ? Cursors.Hand : Cursors.Default; Invalidate(); }
+                if (d != hotDrive) { hotDrive = d; Cursor = d >= 0 ? Cursors.Hand : Cursors.Default; anim.Start(); }
                 return;
             }
             if (mode != Map) return;
@@ -2144,7 +2335,7 @@ namespace OOutSize
         protected override void OnMouseLeave(EventArgs e)
         {
             base.OnMouseLeave(e);
-            if (hotDrive != -1) { hotDrive = -1; Invalidate(); }
+            if (hotDrive != -1) { hotDrive = -1; anim.Start(); }
             if (hover != null)
             {
                 hover = null;
@@ -2189,22 +2380,24 @@ namespace OOutSize
         }
     }
 
-    // swatch per coloured file type. click one to keep its colour and grey out everything else
+    // the key under the map. point at a file type and the rest dim for as long as the mouse stays there,
+    // click to keep it that way. that is the guide's rule for picking one mark out of a chart
     internal sealed class Legend : Control
     {
         string[] names = new string[0];
         long[] bytes = new long[0];
         long other, guarded;
-        int emph = -1;
+        int emph = -1, hot = -1;
         readonly List<Rectangle> boxes = new List<Rectangle>();
 
         public event SlotEvent EmphasisWanted;
+        public event SlotEvent PreviewWanted;
 
         public Legend()
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
                 | ControlStyles.ResizeRedraw, true);
-            BackColor = Ui.Band;
+            BackColor = Ui.White;
         }
 
         public void Set(string[] typeNames, long[] typeBytes, long otherBytes, long guardedBytes)
@@ -2214,6 +2407,7 @@ namespace OOutSize
             other = otherBytes;
             guarded = guardedBytes;
             emph = -1;
+            hot = -1;
             Invalidate();
         }
 
@@ -2231,12 +2425,14 @@ namespace OOutSize
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            g.Clear(Ui.Band);
+            g.Clear(Ui.White);
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            g.DrawLine(Ui.P(Ui.GrayLine), 0, 0, ClientSize.Width, 0);
             boxes.Clear();
             if (names.Length == 0) return;
-            int h = 24, x = 10, y = 2;
-            Ui.Text(g, "File types", Ui.Small, Ui.Ink2, x, y, 64, h, Ui.Left);
+            int shown = hot >= 0 ? hot : emph;
+            int h = 24, x = 10, y = 3;
+            Ui.Text(g, "File types", Ui.Label, Ui.Gray, x, y, 64, h, Ui.Left);
             x += 68;
             // each coloured type, then everything else, then the striped system pile. wraps onto a second row
             int count = names.Length + 2;
@@ -2246,19 +2442,20 @@ namespace OOutSize
                 if (i >= names.Length && size <= 0) { boxes.Add(Rectangle.Empty); continue; }
                 string label = Label(i);
                 string amount = Fmt.Size(size);
-                int lw = Ui.Width(g, label, i == emph ? Ui.Bold : Ui.Base), sw = Ui.Width(g, amount, Ui.Small);
+                Font face = i == emph ? Ui.LabelBold : Ui.Label;
+                int lw = Ui.Width(g, label, face), sw = Ui.Width(g, amount, Ui.Label);
                 int w = 16 + lw + 4 + sw + 14;
                 if (x + w > ClientSize.Width && x > 78) { x = 78; y += h; }
                 if (y + h > ClientSize.Height + 2) break;
-                if (i > names.Length) g.FillRectangle(Ui.Hatch(Ui.Blue), x, y + h / 2 - 5, 10, 10);
+                bool dimmed = shown >= 0 && i != shown && i < names.Length;
+                if (i > names.Length) g.FillRectangle(Ui.Hatch(Ui.TypeFill[0]), x, y + h / 2 - 5, 10, 10);
                 else
                 {
-                    Color c = i == names.Length ? Ui.Other : Ui.TypeFill[i];
-                    if (emph >= 0 && i != emph) c = Ui.White;
-                    g.FillRectangle(Ui.B(c), x, y + h / 2 - 5, 10, 10);
+                    Color c = i == names.Length ? Ui.Other : (dimmed ? Ui.TypeDim[i] : Ui.TypeFill[i]);
+                    Ui.Box(g, x, y + h / 2 - 5, 10, 10, 1, c, Color.Empty);
                 }
-                Ui.Text(g, label, i == emph ? Ui.Bold : Ui.Base, Ui.Ink, x + 15, y, lw + 4, h, Ui.Left);
-                Ui.Text(g, amount, Ui.Small, Ui.Ink2, x + 16 + lw + 4, y, sw + 4, h, Ui.Left);
+                Ui.Text(g, label, face, dimmed ? Ui.Gray : Ui.Graphite, x + 15, y, lw + 4, h, Ui.Left);
+                Ui.Text(g, amount, Ui.Label, Ui.Gray, x + 16 + lw + 4, y, sw + 4, h, Ui.Left);
                 boxes.Add(i < names.Length ? new Rectangle(x - 4, y + 2, w - 6, h - 4) : Rectangle.Empty);
                 x += w;
             }
@@ -2267,39 +2464,57 @@ namespace OOutSize
         string Label(int i)
         {
             if (i < names.Length) return names[i];
-            return i == names.Length ? "everything else" : "striped: Windows system files, do not delete by hand";
+            return i == names.Length ? "everything else" : "striped: Windows system files";
+        }
+
+        int KeyAt(Point p)
+        {
+            for (int i = 0; i < boxes.Count; i++) if (boxes[i].Contains(p)) return i;
+            return -1;
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            for (int i = 0; i < boxes.Count; i++)
-            {
-                if (!boxes[i].Contains(e.Location)) continue;
-                if (EmphasisWanted != null) EmphasisWanted(i == emph ? -1 : i);
-                return;
-            }
+            int i = KeyAt(e.Location);
+            if (i >= 0 && EmphasisWanted != null) EmphasisWanted(i == emph ? -1 : i);
         }
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
-            bool on = false;
-            for (int i = 0; i < boxes.Count; i++) if (boxes[i].Contains(e.Location)) on = true;
-            Cursor = on ? Cursors.Hand : Cursors.Default;
+            Aim(KeyAt(e.Location));
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            Aim(-1);
+        }
+
+        void Aim(int i)
+        {
+            Cursor = i >= 0 ? Cursors.Hand : Cursors.Default;
+            if (i == hot) return;
+            hot = i;
+            Invalidate();
+            if (PreviewWanted != null) PreviewWanted(i);
         }
     }
 
-    // header strip in the house report style - what got scanned on the left, soft coloured number tiles
-    // on the right and the orange rule underneath
+    // header strip to the guide - what got scanned on the left, number tiles on the right and
+    // the 3px orange bar underneath
     internal sealed class Summary : Control
     {
-        const int TileW = 126, TileH = 60, Gap = 10;
+        const int TileW = 140, TileH = 60, Gap = 10;
         public string Head = "", Line1 = "", Line2 = "";
         public bool Ready, HasVolume;
         public long Bytes, FileCount, DirCount, Unread, Hidden, VolTotal, VolFree;
         public string VolName = "";
         Rectangle linkBox;
+        bool overLink;
+        float lift;
+        readonly System.Windows.Forms.Timer anim = new System.Windows.Forms.Timer();
 
         public event EventHandler LinkClicked;
 
@@ -2307,7 +2522,15 @@ namespace OOutSize
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
                 | ControlStyles.ResizeRedraw, true);
-            BackColor = Ui.Surface;
+            BackColor = Ui.White;
+            anim.Interval = 15;
+            anim.Tick += delegate
+            {
+                float want = overLink ? 1f : 0f;
+                lift = lift < want ? Math.Min(want, lift + 15f / 180f) : Math.Max(want, lift - 15f / 180f);
+                if (lift == want) anim.Stop();
+                Invalidate();
+            };
         }
 
         public void Clear()
@@ -2320,9 +2543,10 @@ namespace OOutSize
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            g.Clear(Ui.Surface);
+            g.Clear(Ui.White);
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
             int W = ClientSize.Width, H = ClientSize.Height;
+            // orange is the accent, and this is the bar the guide puts under a header
             g.FillRectangle(Ui.B(Ui.Orange), 0, H - 3, W, 3);
             linkBox = Rectangle.Empty;
             int textW = W - 28;
@@ -2342,53 +2566,59 @@ namespace OOutSize
                 textW = x - 28;
                 for (int i = 0; i < tiles.Count; i++, x += TileW + Gap) Tile(g, tiles[i], x, 10);
             }
-            Ui.Text(g, Head, Ui.Title, Ui.Ink, 14, 10, textW, 22, Ui.Left);
-            Ui.Text(g, Line1, Ui.Base, Ui.Ink2, 14, 33, textW, 18, Ui.Left);
-            Ui.Text(g, Line2, Ui.Base, Ui.Ink2, 14, 52, textW, 18, Ui.Left);
+            Ui.Text(g, Head, Ui.Head, Ui.Graphite, 14, 10, textW, 22, Ui.Left);
+            Ui.Text(g, Line1, Ui.Label, Ui.Gray, 14, 34, textW, 16, Ui.Left);
+            Ui.Text(g, Line2, Ui.Label, Ui.Gray, 14, 51, textW, 16, Ui.Left);
         }
 
+        // each tile has its own colour and keeps it whichever of the others are showing. with all six up they
+        // run in the guide's order: yellow, blue, green, aqua, orange, purple
         void Tile(Graphics g, int kind, int x, int y)
         {
-            Color edge = Ui.Blue, wash = Ui.Track, dot = Color.Empty;
             string value = "", label = "";
+            Color labelInk = Ui.Gray;
+            Font labelFace = Ui.Label;
             switch (kind)
             {
                 case 0: value = Fmt.Size(Bytes); label = "scanned"; break;
-                case 1: value = Fmt.Count(FileCount); label = FileCount == 1 ? "file" : "files"; edge = Ui.Teal; wash = Ui.TealWash; break;
-                case 2: value = Fmt.Count(DirCount); label = DirCount == 1 ? "folder" : "folders"; edge = Ui.Violet; wash = Ui.VioletWash; break;
-                case 3: value = Fmt.Size(Hidden); label = "in use but not visible"; edge = Ui.Yellow; wash = Ui.YellowWash; break;
+                case 1: value = Fmt.Count(FileCount); label = FileCount == 1 ? "file" : "files"; break;
+                case 2:
+                    value = Fmt.Count(DirCount);
+                    label = DirCount == 1 ? "folder" : "folders";
+                    labelInk = Ui.Graphite;     // green-light is too dark for the grey, the guide says graphite only
+                    break;
+                case 3: value = Fmt.Size(Hidden); label = "in use but not visible"; break;
                 case 4:
                     value = Fmt.Count(Unread);
                     label = "could not be read, list";
-                    edge = Ui.Orange;
-                    wash = Ui.OrangeWash;
                     linkBox = new Rectangle(x, y, TileW, TileH);
                     break;
                 default:
                     double free = (double)VolFree / VolTotal;
                     value = Fmt.Size(VolFree);
                     label = "free of " + Fmt.Size(VolTotal);
-                    // status colours the way the reports do it - green fine, yellow getting tight, red low
-                    dot = free < 0.10 ? Ui.Critical : (free < 0.20 ? Ui.Yellow : Ui.Good);
-                    edge = dot;
-                    wash = free < 0.10 ? Ui.CriticalTrack : (free < 0.20 ? Ui.YellowWash : Ui.GoodWash);
-                    if (free < 0.10) label = "free, low on space";
+                    // there is no red tile. bad is red text with a mark in front so it never rests on the colour,
+                    // and it goes bold when things get tight
+                    if (free < 0.20) { label = "\u25BC low, " + label; labelInk = Ui.RedText; }
+                    if (free < 0.10) labelFace = Ui.LabelBold;
                     break;
             }
-            g.FillRectangle(Ui.B(wash), x, y, TileW, TileH);
-            g.FillRectangle(Ui.B(edge), x, y, TileW, 3);
-            Ui.Text(g, value, Ui.Number, Ui.Ink, x + 7, y + 5, TileW - 10, 30, Ui.Left);
-            int lx = x + 9;
-            if (!dot.IsEmpty)
+            float fy = y;
+            if (kind == 4 && lift > 0)
             {
-                SmoothingMode sm = g.SmoothingMode;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.FillEllipse(Ui.B(dot), lx, y + 41, 8, 8);
-                g.SmoothingMode = sm;
-                lx += 12;
+                // anything you can click rises 2px and takes a shadow while the mouse is on it
+                float t = Ui.Ease(lift);
+                fy = y - 2f * t;
+                Ui.Shadow(g, x, fy, TileW, TileH, 6, 1 + 3 * t, 5, (int)(56 * t));
             }
-            Ui.Text(g, label, Ui.Small, Ui.Ink2, lx, y + 36, x + TileW - 4 - lx, 18, Ui.Left);
-            if (kind == 4) g.DrawLine(Ui.P(Ui.OrangeInk), lx + 1, y + 53, x + TileW - 10, y + 53);
+            Ui.Tile(g, x, fy, TileW, TileH, Ui.TileLight[kind], Ui.TileBar[kind]);
+            Ui.Text(g, value, Ui.Numeral, Ui.Graphite, x + 8, fy + 8, TileW - 12, 28, Ui.Left);
+            Ui.Text(g, label, labelFace, labelInk, x + 10, fy + 38, TileW - 14, 16, Ui.Left);
+            if (kind == 4)
+            {
+                int ly = (int)Math.Round(fy) + 54;
+                g.DrawLine(Ui.P(Ui.Orange), x + 11, ly, x + 9 + Math.Min(TileW - 22, Ui.Width(g, label, labelFace)), ly);
+            }
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
@@ -2400,11 +2630,26 @@ namespace OOutSize
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
-            Cursor = linkBox.Contains(e.Location) ? Cursors.Hand : Cursors.Default;
+            Over(linkBox.Contains(e.Location));
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            Over(false);
+        }
+
+        void Over(bool inside)
+        {
+            Cursor = inside ? Cursors.Hand : Cursors.Default;
+            if (inside == overLink) return;
+            overLink = inside;
+            anim.Start();
         }
     }
 
-    // yellow strip that shows when the process has no admin rights, so nobody takes a partial scan for the full picture
+    // strip that shows when the process has no admin rights, so nobody takes a partial scan for the full picture.
+    // orange because that is the guide's colour for what needs attention: its light background and a bar on top
     internal sealed class Notice : Control
     {
         public int Reserve;     // room kept clear on the right for the restart button
@@ -2413,25 +2658,100 @@ namespace OOutSize
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
                 | ControlStyles.ResizeRedraw, true);
-            BackColor = Ui.YellowWash;
+            BackColor = Ui.OrangeLight;
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            g.Clear(Ui.YellowWash);
+            g.Clear(Ui.OrangeLight);
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
             int W = ClientSize.Width, H = ClientSize.Height;
-            g.DrawRectangle(Ui.P(Ui.Yellow), 0, 0, W - 1, H - 1);
+            g.FillRectangle(Ui.B(Ui.Orange), 0, 0, W, 3);
             // warning triangle. the colour never carries it alone, the words sit right next to it
-            int x = 12, y = H / 2 - 8;
+            int x = 12, y = (H + 3) / 2 - 8;
             SmoothingMode sm = g.SmoothingMode;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.FillPolygon(Ui.B(Ui.Yellow), new Point[] { new Point(x + 8, y), new Point(x + 17, y + 16), new Point(x - 1, y + 16) });
+            g.FillPolygon(Ui.B(Ui.Orange), new Point[] { new Point(x + 8, y), new Point(x + 17, y + 16), new Point(x - 1, y + 16) });
             g.SmoothingMode = sm;
-            g.FillRectangle(Ui.B(Ui.Ink), x + 7, y + 6, 2, 5);
-            g.FillRectangle(Ui.B(Ui.Ink), x + 7, y + 12, 2, 2);
-            Ui.Text(g, Text, Ui.Bold, Ui.YellowInk, 38, 0, W - 46 - Reserve, H, Ui.Left);
+            g.FillRectangle(Ui.B(Ui.White), x + 7, y + 6, 2, 5);
+            g.FillRectangle(Ui.B(Ui.White), x + 7, y + 12, 2, 2);
+            Ui.Text(g, Text, Ui.Bold, Ui.OrangeText, 38, 3, W - 46 - Reserve, H - 3, Ui.Left);
+        }
+    }
+
+    // a button to the guide: anything clickable rises 2px and takes a shadow under the mouse, over 0.18s.
+    // sti;l a real winforms button underneath, so tab, enter and space work as they always did.
+    // the control is a little bigger than the face it draws so the rise and the shadow have somewhere to go
+    internal sealed class LiftButton : Button
+    {
+        const int PadX = 3, PadTop = 4, PadBottom = 6;
+        public int Kind;        // 0 plain, 1 the main action, 2 the main action sat on a tinted strip
+        bool inside, held;
+        float lift;
+        readonly System.Windows.Forms.Timer anim = new System.Windows.Forms.Timer();
+
+        public LiftButton()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.ResizeRedraw, true);
+            anim.Interval = 15;
+            anim.Tick += delegate
+            {
+                float want = inside && !held && Enabled ? 1f : 0f;
+                lift = lift < want ? Math.Min(want, lift + 15f / 180f) : Math.Max(want, lift - 15f / 180f);
+                if (lift == want) anim.Stop();
+                Invalidate();
+            };
+        }
+
+        // says where the face goes. the control takes its margins on top of that
+        public void Place(int x, int y, int w, int h)
+        {
+            SetBounds(x - PadX, y - PadTop, w + 2 * PadX, h + PadTop + PadBottom);
+        }
+
+        protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); inside = true; anim.Start(); }
+        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); inside = false; anim.Start(); }
+        protected override void OnMouseDown(MouseEventArgs mevent) { base.OnMouseDown(mevent); held = true; anim.Start(); Invalidate(); }
+        protected override void OnMouseUp(MouseEventArgs mevent) { base.OnMouseUp(mevent); held = false; anim.Start(); Invalidate(); }
+        protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); anim.Start(); Invalidate(); }
+        protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
+        protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
+
+        protected override void OnPaint(PaintEventArgs pevent)
+        {
+            Graphics g = pevent.Graphics;
+            g.Clear(Parent != null ? Parent.BackColor : Ui.White);
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            float t = Ui.Ease(lift);
+            float fx = PadX, fw = Width - 2 * PadX, fh = Height - PadTop - PadBottom;
+            float fy = PadTop - 2f * t;
+            if (t > 0) Ui.Shadow(g, fx, fy, fw, fh, 4, 1 + 2 * t, 3, (int)(60 * t));
+
+            // plain ones are white with a gray-border edge. the main action wears the accent, orange with its own
+            // light background and text step, or white inside when it already sits on orange-light
+            bool main = Kind != 0;
+            Color fill = !main ? (held ? Ui.GrayLight : Ui.White)
+                : (Kind == 1) != held ? Ui.OrangeLight : Ui.White;
+            Color edge = main ? Ui.Orange : Ui.GrayBorder;
+            Color ink = main ? Ui.OrangeText : Ui.Graphite;
+            if (!Enabled) { fill = Ui.White; edge = Ui.GrayLine; ink = Ui.GrayBorder; }
+            Ui.Box(g, fx, fy, fw, fh, 4, fill, edge);
+            Ui.Text(g, Text, main ? Ui.Bold : Ui.Base, ink, fx + 2, fy, fw - 4, fh, Ui.Mid);
+            // keyboard focus gets the guide's blue outline
+            if (Focused && ShowFocusCues)
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                using (GraphicsPath ring = Ui.Round(fx + 2.5f, fy + 2.5f, fw - 5, fh - 5, 2, 2, 2, 2)) g.DrawPath(Ui.P(Ui.Blue), ring);
+                g.SmoothingMode = SmoothingMode.None;
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) anim.Dispose();
+            base.Dispose(disposing);
         }
     }
 
@@ -2450,8 +2770,8 @@ namespace OOutSize
     {
         readonly Options opt;
         readonly ComboBox pathBox = new ComboBox();
-        readonly Button browseBtn = new Button(), scanBtn = new Button(), upBtn = new Button(),
-            openBtn = new Button(), adminBtn = new Button();
+        readonly LiftButton browseBtn = new LiftButton(), scanBtn = new LiftButton(), upBtn = new LiftButton(),
+            openBtn = new LiftButton(), adminBtn = new LiftButton();
         readonly Label pathLbl = new Label(), crumb = new Label(), status = new Label();
         readonly Summary summary = new Summary();
         readonly Notice notice = new Notice();
@@ -2491,7 +2811,7 @@ namespace OOutSize
             Text = "OOutSize" + (notAdmin ? "  (not running as administrator)" : "") + (o.ReadOnly ? "  (read only)" : "");
             AutoScaleMode = AutoScaleMode.None;
             Font = Ui.Base;
-            BackColor = Ui.Plane;
+            BackColor = Ui.White;
             StartPosition = FormStartPosition.CenterScreen;
             Rectangle area = Screen.PrimaryScreen.WorkingArea;
             ClientSize = new Size(Math.Max(760, Math.Min(1360, area.Width - 60)), Math.Max(480, Math.Min(860, area.Height - 80)));
@@ -2499,7 +2819,9 @@ namespace OOutSize
             KeyPreview = true;
 
             pathLbl.Text = "Path";
-            pathLbl.ForeColor = Ui.OnFrame;
+            pathLbl.Font = Ui.Label;
+            pathLbl.ForeColor = Ui.Gray;
+            menu.Font = Ui.Base;
             pathBox.DropDownStyle = ComboBoxStyle.DropDown;
             try
             {
@@ -2528,7 +2850,7 @@ namespace OOutSize
             Setup(upBtn, "Up", false, delegate { GoUp(); });
             Setup(openBtn, "Open in Explorer", false, delegate { if (view != null) Reveal(view); });
             Setup(adminBtn, "Restart as admin", true, delegate { Elevate(); });
-            browseBtn.FlatAppearance.BorderColor = upBtn.FlatAppearance.BorderColor = openBtn.FlatAppearance.BorderColor = Ui.Surface;
+            adminBtn.Kind = 2;
             adminBtn.Visible = canRestart;
             notice.Text = "Not running as administrator. Folders this account cannot read are left out, so the totals may be short.";
             notice.Reserve = canRestart ? 148 : 0;
@@ -2538,20 +2860,22 @@ namespace OOutSize
 
             crumb.AutoEllipsis = true;
             crumb.TextAlign = ContentAlignment.MiddleLeft;
-            crumb.ForeColor = Ui.Ink;
-            crumb.BackColor = Ui.Band;
+            crumb.ForeColor = Ui.Graphite;
+            crumb.BackColor = Ui.White;
             status.AutoEllipsis = true;
             status.TextAlign = ContentAlignment.MiddleLeft;
-            status.ForeColor = Ui.OnFrame;
+            status.ForeColor = Ui.Gray;
             status.Text = Hint;
+            // the divider is a hairline now. orange is kept for the bar under the header and for what needs attention
             grip.Cursor = Cursors.VSplit;
-            grip.BackColor = Ui.Orange;
+            grip.BackColor = Ui.White;
+            grip.Paint += delegate(object s, PaintEventArgs e) { e.Graphics.DrawLine(Ui.P(Ui.GrayBorder), 2, 0, 2, grip.Height); };
             grip.MouseDown += delegate { dragging = true; grip.Capture = true; };
             grip.MouseUp += delegate { dragging = false; grip.Capture = false; };
             grip.MouseMove += delegate(object s, MouseEventArgs e)
             {
                 if (!dragging) return;
-                split = PointToClient(grip.PointToScreen(e.Location)).X - 3;
+                split = PointToClient(grip.PointToScreen(e.Location)).X - 2;
                 Arrange();
             };
 
@@ -2563,6 +2887,7 @@ namespace OOutSize
             map.MenuWanted += ShowMenu;
             map.DriveWanted += StartScan;
             legend.EmphasisWanted += delegate(int s) { legend.SetEmphasis(s); map.SetEmphasis(s); };
+            legend.PreviewWanted += delegate(int s) { map.SetPreview(s); };
             summary.LinkClicked += delegate { ShowUnreadable(); };
             tick.Interval = 150;
             tick.Tick += delegate { OnTick(); };
@@ -2573,19 +2898,20 @@ namespace OOutSize
             map.ShowIdle();
         }
 
-        // flat buttons in the report colours - the main action gets the pale orange fill that goes full orange on hover
-        void Setup(Button b, string text, bool main, EventHandler click)
+        // the main action wears the accent, the rest are plain. how they look and move is in LiftButton
+        void Setup(LiftButton b, string text, bool main, EventHandler click)
         {
             b.Text = text;
-            b.FlatStyle = FlatStyle.Flat;
-            b.UseVisualStyleBackColor = false;
-            b.BackColor = main ? Ui.Button : Ui.Surface;
-            b.ForeColor = Ui.Ink;
-            b.FlatAppearance.BorderSize = 1;
-            b.FlatAppearance.BorderColor = main ? Ui.Button : Ui.Axis;
-            b.FlatAppearance.MouseOverBackColor = main ? Ui.Orange : Ui.Hot;
-            b.FlatAppearance.MouseDownBackColor = main ? Ui.Orange : Ui.Hair;
+            b.Kind = main ? 1 : 0;
             b.Click += click;
+        }
+
+        // the footer is a hairline with grey text under it, the way the guide does one
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            int y = ClientSize.Height - 26;
+            e.Graphics.DrawLine(Ui.P(Ui.GrayLine), 0, y, ClientSize.Width, y);
         }
 
         bool Scanning { get { return sub != null || (scan != null && !scan.Done); } }
@@ -2632,22 +2958,22 @@ namespace OOutSize
             int W = ClientSize.Width, H = ClientSize.Height;
             if (W < 200 || H < 200) return;
             int right = W - 10;
-            pathLbl.SetBounds(12, 13, 34, 18);
+            pathLbl.SetBounds(12, 14, 34, 16);
             int fixedW = 48 + 8 + 86 + 6 + 72 + 22 + 56 + 6 + 128 + 16;
             int boxW = Math.Max(160, Math.Min(560, right - fixedW));
             int x = 48;
             pathBox.SetBounds(x, 10, boxW, 24); x += boxW + 8;
-            browseBtn.SetBounds(x, 8, 86, 26); x += 92;
-            scanBtn.SetBounds(x, 8, 72, 26); x += 94;
-            upBtn.SetBounds(x, 8, 56, 26); x += 62;
-            openBtn.SetBounds(x, 8, 128, 26);
+            browseBtn.Place(x, 8, 86, 26); x += 92;
+            scanBtn.Place(x, 8, 72, 26); x += 94;
+            upBtn.Place(x, 8, 56, 26); x += 62;
+            openBtn.Place(x, 8, 128, 26);
 
             int y = 42;
             if (notAdmin)
             {
-                notice.SetBounds(0, y, W, 32);
-                if (canRestart) adminBtn.SetBounds(W - 140, 3, 130, 26);
-                y += 32;
+                notice.SetBounds(0, y, W, 38);
+                if (canRestart) adminBtn.Place(W - 142, 8, 130, 24);
+                y += 38;
             }
             summary.SetBounds(0, y, W, 84);
             int top = y + 84, bottom = H - 26, bodyH = Math.Max(60, bottom - top);
@@ -2656,12 +2982,13 @@ namespace OOutSize
             if (split < lo) split = lo;
             if (split > hi) split = hi;
             tree.SetBounds(0, top, split, bodyH);
-            grip.SetBounds(split, top, 3, bodyH);
-            int rx = split + 3, rw = W - rx;
+            grip.SetBounds(split, top, 5, bodyH);
+            int rx = split + 5, rw = W - rx;
             crumb.SetBounds(rx, top, rw, 26);
             map.SetBounds(rx, top + 26, rw, Math.Max(20, bodyH - 26 - 52));
             legend.SetBounds(rx, top + bodyH - 52, rw, 52);
             status.SetBounds(10, H - 24, W - 20, 20);
+            Invalidate();
         }
 
         // ---------- scanning
@@ -3314,7 +3641,7 @@ namespace OOutSize
                 t.WordWrap = false;
                 t.ScrollBars = ScrollBars.Both;
                 t.Dock = DockStyle.Fill;
-                t.BackColor = Ui.Surface;
+                t.BackColor = Ui.White;
                 string note = notAdmin ? "Not running as administrator, so some of these may just need an admin window.\r\n\r\n" : "";
                 t.Text = note + string.Join("\r\n", list)
                     + (unreadCount > list.Length ? "\r\n... and " + Fmt.Count(unreadCount - list.Length) + " more" : "");
